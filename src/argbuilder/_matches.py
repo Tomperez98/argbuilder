@@ -85,9 +85,7 @@ class ArgMatches:
             f"add default_missing_value() or use get_one({id!r}, ...)",
         )
         values = self._values(id)
-        invariant(
-            len(values) == 1, f"argument {id!r} resolved to {values!r}, not one value"
-        )
+        invariant(len(values) == 1, f"argument {id!r} resolved to {values!r}, not one value")
         return _checked(id, values[0], type_)
 
     def get_many[T](self, id: str, type_: type[T]) -> tuple[T, ...]:
@@ -155,9 +153,7 @@ class ArgMatches:
     def _arg(self, id: str) -> ResolvedArg:
         arg = self._cmd.by_id.get(id)
         if arg is None:
-            bug(
-                f"unknown argument id {id!r}; defined ids: {', '.join(self._cmd.by_id)}"
-            )
+            bug(f"unknown argument id {id!r}; defined ids: {', '.join(self._cmd.by_id)}")
         return arg
 
     def _value_arg(self, id: str, method: str) -> ResolvedArg:

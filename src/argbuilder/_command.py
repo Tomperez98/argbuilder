@@ -125,34 +125,24 @@ class Command:
         return result
 
     def subcommand_required(self, yes: bool) -> Command:
-        return self._with(
-            subcommand_required=_check_bool(repr(self), "subcommand_required", yes)
-        )
+        return self._with(subcommand_required=_check_bool(repr(self), "subcommand_required", yes))
 
     def arg_required_else_help(self, yes: bool) -> Command:
         """With no arguments at all, print help to stderr and exit 2."""
         return self._with(
-            arg_required_else_help=_check_bool(
-                repr(self), "arg_required_else_help", yes
-            )
+            arg_required_else_help=_check_bool(repr(self), "arg_required_else_help", yes)
         )
 
     def disable_help_flag(self, yes: bool) -> Command:
-        return self._with(
-            disable_help_flag=_check_bool(repr(self), "disable_help_flag", yes)
-        )
+        return self._with(disable_help_flag=_check_bool(repr(self), "disable_help_flag", yes))
 
     def disable_version_flag(self, yes: bool) -> Command:
-        return self._with(
-            disable_version_flag=_check_bool(repr(self), "disable_version_flag", yes)
-        )
+        return self._with(disable_version_flag=_check_bool(repr(self), "disable_version_flag", yes))
 
     def disable_help_subcommand(self, yes: bool) -> Command:
         """Don't add the `help [COMMAND]...` subcommand a command with subcommands gets."""
         return self._with(
-            disable_help_subcommand=_check_bool(
-                repr(self), "disable_help_subcommand", yes
-            )
+            disable_help_subcommand=_check_bool(repr(self), "disable_help_subcommand", yes)
         )
 
     # -- use ----------------------------------------------------------------
@@ -178,18 +168,14 @@ class Command:
             "argv must be a list of str, not one str; split it first",
         )
         tokens = tuple(argv)
-        invariant(
-            len(tokens) >= 1, "argv must start with the binary name, like sys.argv"
-        )
+        invariant(len(tokens) >= 1, "argv must start with the binary name, like sys.argv")
         invariant(
             all(isinstance(token, str) for token in tokens),
             f"argv must hold str, got {tokens!r}",
         )
         return parse(build(self._spec), tokens[1:], env)
 
-    def get_matches_from(
-        self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV
-    ) -> ArgMatches:
+    def get_matches_from(self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> ArgMatches:
         """Like `try_get_matches_from`, but print the error and exit on failure."""
         result = self.try_get_matches_from(argv, env)
         if isinstance(result, Error):

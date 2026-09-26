@@ -31,9 +31,7 @@ from argbuilder import (
 
 def ok(cmd: Command, *args: str, env: dict[str, str] | None = None) -> ArgMatches:
     result = cmd.try_get_matches_from([cmd.get_name(), *args], env or {})
-    assert isinstance(result, ArgMatches), (
-        result.render() if isinstance(result, Error) else result
-    )
+    assert isinstance(result, ArgMatches), result.render() if isinstance(result, Error) else result
     return result
 
 
@@ -48,9 +46,7 @@ def err(cmd: Command, *args: str, env: dict[str, str] | None = None) -> Error:
 VALUE = Command("prog").arg(Arg("name").short("n").long("name"))
 
 
-@pytest.mark.parametrize(
-    "argv", [["--name", "x"], ["--name=x"], ["-n", "x"], ["-nx"], ["-n=x"]]
-)
+@pytest.mark.parametrize("argv", [["--name", "x"], ["--name=x"], ["-n", "x"], ["-nx"], ["-n=x"]])
 def test_option_value_spellings(argv: list[str]) -> None:
     assert ok(VALUE, *argv).get_one("name", str) == "x"
 
@@ -155,13 +151,9 @@ def test_negative_number_needs_escape_or_opt_in() -> None:
     plain = Command("prog").arg(Arg("n").long("n").value_parser(int))
     assert err(plain, "--n", "-5").tip == "to pass '-5' as a value, use '--n=-5'"
     assert ok(plain, "--n=-5").get_one("n", int) == -5
-    hyphen = Command("prog").arg(
-        Arg("n").long("n").value_parser(int).allow_hyphen_values(True)
-    )
+    hyphen = Command("prog").arg(Arg("n").long("n").value_parser(int).allow_hyphen_values(True))
     assert ok(hyphen, "--n", "-5").get_one("n", int) == -5
-    positional = Command("prog").arg(
-        Arg("n").value_parser(int).allow_hyphen_values(True)
-    )
+    positional = Command("prog").arg(Arg("n").value_parser(int).allow_hyphen_values(True))
     assert ok(positional, "-5").get_one("n", int) == -5
 
 
@@ -223,14 +215,10 @@ def test_exact_count() -> None:
 
 
 def test_value_delimiter() -> None:
-    cmd = Command("prog").arg(
-        Arg("tags").long("tags").num_args(1, None).value_delimiter(",")
-    )
+    cmd = Command("prog").arg(Arg("tags").long("tags").num_args(1, None).value_delimiter(","))
     assert ok(cmd, "--tags", "a,b", "c").get_many("tags", str) == ("a", "b", "c")
     assert ok(cmd, "--tags=a,b").get_many("tags", str) == ("a", "b")
-    assert isinstance(
-        err(cmd, "--tags=a,b", "c").kind, UnknownArgument
-    )  # inline = one occurrence
+    assert isinstance(err(cmd, "--tags=a,b", "c").kind, UnknownArgument)  # inline = one occurrence
 
 
 # -- value parsers --------------------------------------------------------------
@@ -268,12 +256,8 @@ def test_value_parser_shorthands() -> None:
     assert "0 is not in 1..=65535" in err(cmd, "--port", "0").message
     assert "3 is not in range(0, 10, 2)" in err(cmd, "--even", "3").message
     assert err(cmd, "--ratio", "x").message.endswith(": invalid float literal")
-    assert err(cmd, "--ratio=").message.endswith(
-        ": cannot parse float from empty string"
-    )
-    assert err(cmd, "--port=").message.endswith(
-        ": cannot parse integer from empty string"
-    )
+    assert err(cmd, "--ratio=").message.endswith(": cannot parse float from empty string")
+    assert err(cmd, "--port=").message.endswith(": cannot parse integer from empty string")
     assert isinstance(err(cmd, "--dry", "no").kind, InvalidValue)
 
 
@@ -281,8 +265,7 @@ def test_possible_values_error_and_tip() -> None:
     cmd = Command("prog").arg(Arg("mode").long("mode").value_parser(["fast", "safe"]))
     error = err(cmd, "--mode", "saf")
     assert (
-        error.message
-        == "invalid value 'saf' for '--mode <MODE>'\n  [possible values: fast, safe]"
+        error.message == "invalid value 'saf' for '--mode <MODE>'\n  [possible values: fast, safe]"
     )
     assert error.tip == "a similar value exists: 'safe'"
 
@@ -323,9 +306,7 @@ PORT = Command("prog").arg(
         (["--port", "443"], {"PORT": "80"}, 443, "command_line"),
     ],
 )
-def test_precedence(
-    argv: list[str], env: dict[str, str], port: int, source: ValueSource
-) -> None:
+def test_precedence(argv: list[str], env: dict[str, str], port: int, source: ValueSource) -> None:
     matches = ok(PORT, *argv, env=env)
     assert (matches.get_one("port", int), matches.value_source("port")) == (
         port,
@@ -345,9 +326,7 @@ def test_bad_env_value_names_the_variable() -> None:
 
 
 def test_env_flag() -> None:
-    cmd = Command("prog").arg(
-        Arg("debug").long("debug").action("set_true").env("DEBUG")
-    )
+    cmd = Command("prog").arg(Arg("debug").long("debug").action("set_true").env("DEBUG"))
     assert ok(cmd, env={"DEBUG": "yes"}).get_flag("debug")
     assert not ok(cmd, env={"DEBUG": "0"}).get_flag("debug")
     assert isinstance(err(cmd, env={"DEBUG": "maybe"}).kind, InvalidValue)
@@ -364,9 +343,7 @@ def test_env_satisfies_required() -> None:
 
 def test_required_lists_everything_missing() -> None:
     cmd = (
-        Command("prog")
-        .arg(Arg("name").long("name").required(True))
-        .arg(Arg("file").required(True))
+        Command("prog").arg(Arg("name").long("name").required(True)).arg(Arg("file").required(True))
     )
     error = err(cmd)
     assert isinstance(error.kind, MissingRequiredArgument)
@@ -404,9 +381,7 @@ def test_groups() -> None:
     assert isinstance(err(cmd, "--major", "--minor").kind, ArgumentConflict)
     assert ok(cmd, "--minor").get_flag("minor")
     both = cmd.group(ArgGroup("any").args(["major", "minor"]).multiple(True))
-    assert isinstance(
-        err(both, "--major", "--minor").kind, ArgumentConflict
-    )  # "bump" still
+    assert isinstance(err(both, "--major", "--minor").kind, ArgumentConflict)  # "bump" still
 
 
 # -- subcommands ----------------------------------------------------------------
@@ -417,9 +392,7 @@ GIT = (
     .arg(Arg("verbose").short("v").action("count"))
     .subcommand_required(True)
     .subcommand(Command("clone").arg(Arg("remote").required(True)))
-    .subcommand(
-        Command("stash").subcommand(Command("pop").arg(Arg("index").value_parser(int)))
-    )
+    .subcommand(Command("stash").subcommand(Command("pop").arg(Arg("index").value_parser(int))))
 )
 
 
@@ -497,9 +470,7 @@ LEVELS = (
         (["--secret", "x"], "to pass '--secret' as a value, use '-- --secret'"),
     ],
 )
-def test_option_from_another_level_gets_a_placement_tip(
-    argv: list[str], tip: str
-) -> None:
+def test_option_from_another_level_gets_a_placement_tip(argv: list[str], tip: str) -> None:
     error = err(LEVELS, *argv)
     assert isinstance(error.kind, UnknownArgument)
     assert error.tip == tip
@@ -510,9 +481,7 @@ def test_option_from_another_level_gets_a_placement_tip(
 GLOBAL = (
     Command("git")
     .arg(Arg("verbose").short("v").action("count").global_(True))
-    .arg(
-        Arg("color").long("color").default_value("auto").env("GIT_COLOR").global_(True)
-    )
+    .arg(Arg("color").long("color").default_value("auto").env("GIT_COLOR").global_(True))
     .arg(Arg("include").short("I").action("append").global_(True))
     .subcommand(
         Command("remote")
@@ -548,9 +517,7 @@ def test_global_count_adds_up_and_is_read_at_every_level(argv: list[str]) -> Non
 
 def test_global_append_keeps_command_line_order() -> None:
     matches = ok(GLOBAL, "-I", "a", "remote", "-I", "b", "add", "-I", "c")
-    assert {level.get_many("include", str) for level in _levels(matches)} == {
-        ("a", "b", "c")
-    }
+    assert {level.get_many("include", str) for level in _levels(matches)} == {("a", "b", "c")}
 
 
 def test_global_value_sources_are_the_same_at_every_level() -> None:
@@ -576,9 +543,7 @@ def test_global_only_reaches_down() -> None:
     matches = ok(GLOBAL, "remote", "prune", "--dry-run")
     assert [level.get_flag("dry") for level in _levels(matches)[1:]] == [True, True]
     error = err(GLOBAL, "--dry-run", "remote")
-    assert (
-        error.tip == "'--dry-run' is an option of 'git remote'; put it after 'remote'"
-    )
+    assert error.tip == "'--dry-run' is an option of 'git remote'; put it after 'remote'"
 
 
 # -- aliases ----------------------------------------------------------------------
@@ -586,13 +551,7 @@ def test_global_only_reaches_down() -> None:
 ALIASES = (
     Command("git")
     .arg(Arg("color").long("color").visible_alias("colour").alias("tint"))
-    .arg(
-        Arg("quiet")
-        .short("q")
-        .visible_short_alias("s")
-        .short_alias("Q")
-        .action("count")
-    )
+    .arg(Arg("quiet").short("q").visible_short_alias("s").short_alias("Q").action("count"))
     .subcommand(Command("add").visible_alias("stage").alias("a"))
 )
 
@@ -629,9 +588,7 @@ def test_subcommand_aliases_report_the_canonical_name(name: str) -> None:
         ),  # hidden aliases are never suggested
     ],
 )
-def test_suggestions_offer_visible_aliases_only(
-    argv: list[str], kind: ErrorKind
-) -> None:
+def test_suggestions_offer_visible_aliases_only(argv: list[str], kind: ErrorKind) -> None:
     assert err(ALIASES, *argv).kind == kind
 
 
@@ -648,9 +605,7 @@ def test_suggestions_offer_visible_aliases_only(
         (["help", "help"], ["help"]),
     ],
 )
-def test_help_subcommand_prints_the_named_help(
-    argv: list[str], shown: list[str]
-) -> None:
+def test_help_subcommand_prints_the_named_help(argv: list[str], shown: list[str]) -> None:
     error = err(GLOBAL, *argv)
     assert (error.kind, error.exit_code) == (DisplayHelp(), 0)
     expected = err(GLOBAL, *shown, "--help") if shown != ["help"] else None
@@ -672,9 +627,7 @@ def test_help_subcommand_rejects_unknown_names() -> None:
 
 
 def test_help_subcommand_accepts_aliases() -> None:
-    assert (
-        err(ALIASES, "help", "stage").render() == err(ALIASES, "add", "--help").render()
-    )
+    assert err(ALIASES, "help", "stage").render() == err(ALIASES, "add", "--help").render()
 
 
 def test_help_subcommand_can_be_disabled_or_replaced() -> None:
@@ -696,9 +649,7 @@ KINDS = (
     .arg(Arg("port").short("p").long("port").value_parser(range(1, 100)).env("PORT"))
     .arg(Arg("mode").long("mode").value_parser(["fast", "safe"]))
     .arg(Arg("pair").long("pair").num_args(2))
-    .arg(
-        Arg("force").short("f").long("force").action("set_true").conflicts_with("mode")
-    )
+    .arg(Arg("force").short("f").long("force").action("set_true").conflicts_with("mode"))
     .arg(Arg("input").required(True))
     .subcommand(Command("run"))
     .subcommand_required(True)
@@ -717,9 +668,7 @@ KINDS = (
         (
             ["in"],
             {"PORT": "abc"},
-            InvalidValue(
-                "--port <PORT>", "abc", "invalid digit found in string", env="PORT"
-            ),
+            InvalidValue("--port <PORT>", "abc", "invalid digit found in string", env="PORT"),
         ),
         (
             ["in", "--mode", "saf"],
@@ -765,3 +714,35 @@ def test_error_kind_is_matchable() -> None:
             )
         case other:
             pytest.fail(f"unexpected {other!r}")
+
+
+# -- remaining paths ------------------------------------------------------------
+
+
+def test_matches_repr_lists_values_and_subcommand() -> None:
+    assert repr(ok(VALUE, "--name", "x")) == "ArgMatches({'name': ('x',)}, subcommand=None)"
+    assert "subcommand=('clone', ArgMatches(" in repr(ok(GIT, "clone", "origin"))
+
+
+def test_too_many_values_after_a_delimiter_split() -> None:
+    cmd = Command("prog").arg(Arg("pair").long("pair").num_args(1, 2).value_delimiter(","))
+    assert isinstance(err(cmd, "--pair=a,b,c").kind, TooManyValues)
+
+
+def test_variadic_positional_too_few_values() -> None:
+    cmd = Command("prog").arg(Arg("files").num_args(2, 2))
+    assert isinstance(err(cmd, "a").kind, TooFewValues)
+
+
+def test_unbounded_option_stops_at_double_dash() -> None:
+    cmd = Command("prog").arg(Arg("files").long("files").num_args(0, None))
+    assert ok(cmd, "--files", "--").get_many("files", str) == ()
+
+
+def test_requires_a_required_argument_that_is_already_missing() -> None:
+    cmd = (
+        Command("prog").arg(Arg("a").long("a").requires("b")).arg(Arg("b").long("b").required(True))
+    )
+    error = err(cmd, "--a", "x")
+    assert isinstance(error.kind, MissingRequiredArgument)
+    assert error.kind.arguments.count("--b <B>") == 1

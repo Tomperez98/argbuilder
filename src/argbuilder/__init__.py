@@ -10,12 +10,16 @@ Bugs panic, user mistakes return values:
 `ArgAction` and `ValueSource` are `Literal` strings: `.action("count")`.
 `ErrorKind` is a union of frozen dataclasses that carry what went wrong:
 `match error.kind: case InvalidValue(argument=a, value=v): ...`.
+
+Or derive the command from a class, as with clap's derive API:
+`class Cli(Parser): port: int = arg(short=True, default=22)`, then `Cli.parse()`.
 """
 
 from __future__ import annotations
 
 from argbuilder._arg import Arg, ArgGroup
 from argbuilder._command import Command
+from argbuilder._derive import Args, FieldAction, Parser, arg
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -43,6 +47,7 @@ __all__ = [
     "ArgAction",
     "ArgGroup",
     "ArgMatches",
+    "Args",
     "ArgumentConflict",
     "Command",
     "DisplayHelp",
@@ -50,12 +55,14 @@ __all__ = [
     "DisplayVersion",
     "Error",
     "ErrorKind",
+    "FieldAction",
     "Invalid",
     "InvalidSubcommand",
     "InvalidValue",
     "MissingRequiredArgument",
     "MissingSubcommand",
     "ParseFailure",
+    "Parser",
     "Style",
     "TooFewValues",
     "TooManyValues",
@@ -64,4 +71,5 @@ __all__ = [
     "ValueParserLike",
     "ValueSource",
     "ValueValidation",
+    "arg",
 ]

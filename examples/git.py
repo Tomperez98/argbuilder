@@ -78,9 +78,7 @@ def run(matches: ArgMatches) -> str | Error:
             port = sub.get_required("port", int)
             return f"pushing to {sub.get_one('remote', str)}:{port}{force} [v={verbose}, {color}]"
         case ("add", sub):
-            return "adding " + ", ".join(
-                str(path) for path in sub.get_many("paths", Path)
-            )
+            return "adding " + ", ".join(str(path) for path in sub.get_many("paths", Path))
         case other:
             msg = f"subcommand_required(True) guarantees a match, got {other!r}"
             raise AssertionError(msg)

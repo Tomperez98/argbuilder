@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from argbuilder import (
@@ -13,7 +15,7 @@ from argbuilder import (
     ErrorKind,
     Style,
 )
-from argbuilder._style import MAX_WIDTH, MIN_WIDTH, style_for
+from argbuilder._style import MAX_WIDTH, MIN_WIDTH, style_for, terminal_style
 
 CMD = (
     Command("tool")
@@ -83,9 +85,7 @@ def test_error_colors() -> None:
     error = CMD.try_get_matches_from(["tool", "in", "--levl", "x"])
     assert isinstance(error, Error)
     colored = error.render(Style(color=True))
-    assert colored.startswith(
-        "\x1b[1m\x1b[31merror:\x1b[0m unexpected argument '--levl' found"
-    )
+    assert colored.startswith("\x1b[1m\x1b[31merror:\x1b[0m unexpected argument '--levl' found")
     assert "  \x1b[32mtip:\x1b[0m a similar argument exists" in colored
     assert "\x1b[1m\x1b[4mUsage:\x1b[0m tool [OPTIONS] <INPUT>" in colored
     assert _strip_ansi(colored) == error.render()
@@ -132,9 +132,7 @@ def test_exit_styles_for_the_stream(
         (True, 0, {}, Style(color=True, width=MAX_WIDTH)),
     ],
 )
-def test_style_for(
-    is_tty: bool, columns: int | None, env: dict[str, str], expected: Style
-) -> None:
+def test_style_for(is_tty: bool, columns: int | None, env: dict[str, str], expected: Style) -> None:
     assert style_for(is_tty=is_tty, columns=columns, env=env) == expected
 
 
@@ -156,3 +154,24 @@ def _strip_ansi(text: str) -> str:
     for code in ("\x1b[1m", "\x1b[4m", "\x1b[31m", "\x1b[32m", "\x1b[0m"):
         text = text.replace(code, "")
     return text
+
+
+class _TtyStream:
+    """A stream that claims to be a terminal but has no size behind it."""
+
+    def isatty(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return 0
+
+
+def test_terminal_style_survives_an_unqueryable_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_size(fd: int) -> object:
+        raise OSError
+
+    monkeypatch.setattr("argbuilder._style.os.get_terminal_size", no_size)
+    style = terminal_style(_TtyStream())  # ty: ignore[invalid-argument-type]
+    assert style == style_for(is_tty=True, columns=None, env=os.environ)

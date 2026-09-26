@@ -25,9 +25,7 @@ _STRING: ValueParser[str] = ValueParser(lambda raw: raw)
 _FLAG_DEFAULTS: Mapping[ArgAction, tuple[Any, ...]] = MappingProxyType(
     {"set_true": (False,), "set_false": (True,), "count": (0,)}
 )
-_HELP_SPEC = ArgSpec(
-    id="help", short="h", long="help", help="Print help", action="help"
-)
+_HELP_SPEC = ArgSpec(id="help", short="h", long="help", help="Print help", action="help")
 _VERSION_SPEC = ArgSpec(
     id="version",
     short="V",
@@ -169,11 +167,7 @@ def _build(
     user_ids = {arg.id for arg in args}
     if not spec.disable_help_flag and "help" not in user_ids:
         args.append(_resolve_arg(_HELP_SPEC, where))
-    if (
-        spec.version is not None
-        and not spec.disable_version_flag
-        and "version" not in user_ids
-    ):
+    if spec.version is not None and not spec.disable_version_flag and "version" not in user_ids:
         args.append(_resolve_arg(_VERSION_SPEC, where))
     invariant(
         spec.version is not None or all(arg.action != "version" for arg in args),
@@ -216,9 +210,7 @@ def _build(
                 member in by_id,
                 f"{where}: group {group.id!r} names unknown argument {member!r}",
             )
-        groups.append(
-            ResolvedGroup(group.id, group.args, group.required, group.multiple)
-        )
+        groups.append(ResolvedGroup(group.id, group.args, group.required, group.multiple))
 
     globals_ = tuple(arg for arg in args if arg.global_)  # inherited ones first
     subcommands: dict[str, ResolvedCommand] = {}
@@ -241,9 +233,7 @@ def _build(
         f"{where}: subcommand_required(True) but no subcommands are defined",
     )
     help_subcommand = (
-        bool(subcommands)
-        and not spec.disable_help_subcommand
-        and "help" not in subcommand_names
+        bool(subcommands) and not spec.disable_help_subcommand and "help" not in subcommand_names
     )
     if help_subcommand:
         subcommands["help"] = _build(_HELP_SUBCOMMAND, path, depth + 1, ())
@@ -280,10 +270,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
     invariant(
         not positional
         or not (
-            spec.aliases
-            or spec.visible_aliases
-            or spec.short_aliases
-            or spec.visible_short_aliases
+            spec.aliases or spec.visible_aliases or spec.short_aliases or spec.visible_short_aliases
         ),
         f"{label}: aliases need short() or long(); a positional has no flag to alias",
     )
@@ -299,9 +286,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
         )
     if takes_values(action):
         default_arity = (1, None) if positional and action == "append" else (1, 1)
-        min_values, max_values = (
-            spec.num_args if spec.num_args is not None else default_arity
-        )
+        min_values, max_values = spec.num_args if spec.num_args is not None else default_arity
         parser = spec.value_parser if spec.value_parser is not None else _STRING
         invariant(
             not (spec.required and spec.default_values),
@@ -316,15 +301,11 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
             f"{label}: value_delimiter() is only supported on options",
         )
         invariant(
-            action == "append"
-            or max_values is None
-            or len(spec.default_values) <= max_values,
+            action == "append" or max_values is None or len(spec.default_values) <= max_values,
             f"{label}: {len(spec.default_values)} default values, "
             f"but num_args allows at most {max_values}",
         )
-        defaults = tuple(
-            _parse_default(parser, raw, label) for raw in spec.default_values
-        )
+        defaults = tuple(_parse_default(parser, raw, label) for raw in spec.default_values)
         default_missing = tuple(
             _parse_default(parser, raw, label) for raw in spec.default_missing_values
         )
@@ -391,9 +372,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
 def _parse_default(parser: ValueParser[Any], raw: str, label: str) -> Any:
     value = parser.parse(raw)
     if isinstance(value, Invalid):
-        bug(
-            f"{label}: default value {raw!r} is rejected by its value_parser: {value.message}"
-        )
+        bug(f"{label}: default value {raw!r} is rejected by its value_parser: {value.message}")
     return value
 
 
@@ -418,13 +397,11 @@ def _check_positionals(positionals: Sequence[ResolvedArg], where: str) -> None:
 
 def _claim(
     table: dict[str, ResolvedArg],
-    key: str | None,
+    key: str,
     dashes: str,
     arg: ResolvedArg,
     where: str,
 ) -> None:
-    if key is None:
-        return
     taken = table.get(key)
     if taken is arg:
         bug(f"{where}: argument {arg.id!r} lists '{dashes}{key}' more than once")
@@ -433,9 +410,7 @@ def _claim(
         inherited = ""
         if taken.global_ or arg.global_:
             owner = taken.id if taken.global_ else arg.id
-            inherited = (
-                f"; {owner!r} is global, so it is already defined in every subcommand"
-            )
+            inherited = f"; {owner!r} is global, so it is already defined in every subcommand"
         bug(
             f"{where}: '{dashes}{key}' is used by both {taken.id!r} and {arg.id!r}"
             f"{_AUTO_FLAG_HINT if auto else inherited}"

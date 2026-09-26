@@ -11,9 +11,7 @@ from argbuilder._invariant import bug
 if TYPE_CHECKING:
     from argbuilder._value_parser import ValueParser
 
-type ArgAction = Literal[
-    "set", "append", "set_true", "set_false", "count", "help", "version"
-]
+type ArgAction = Literal["set", "append", "set_true", "set_false", "count", "help", "version"]
 """What happens when an argument is encountered. Mirrors clap's `ArgAction`.
 
 - `"set"`: store the value(s); using the argument twice is an error. The default.
@@ -34,7 +32,6 @@ def check_action(owner: str, value: object) -> ArgAction:
     close = difflib.get_close_matches(str(value).lower(), ARG_ACTIONS, n=1)
     hint = f"; did you mean {close[0]!r}?" if close else ""
     bug(f"{owner}.action() takes one of {', '.join(ARG_ACTIONS)}, got {value!r}{hint}")
-    return None
 
 
 def takes_values(action: ArgAction) -> bool:

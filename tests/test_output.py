@@ -23,13 +23,7 @@ CMD = (
     .version("1.2.3")
     .arg(Arg("input").required(True).help("Input file"))
     .arg(Arg("extra").action("append"))
-    .arg(
-        Arg("level")
-        .short("l")
-        .long("level")
-        .value_parser(["low", "high"])
-        .default_value("low")
-    )
+    .arg(Arg("level").short("l").long("level").value_parser(["low", "high"]).default_value("low"))
     .arg(Arg("verbose").short("v").action("count").help("Be loud"))
     .arg(Arg("secret").long("secret").hide(True))
     .arg(Arg("token").long("token").env("TOKEN"))
@@ -109,9 +103,7 @@ def test_subcommand_help_lists_inherited_globals() -> None:
         (["--nope"], UnknownArgument("--nope", suggestion="--token"), 2, True),
     ],
 )
-def test_exit_contract(
-    args: list[str], kind: ErrorKind, code: int, stderr: bool
-) -> None:
+def test_exit_contract(args: list[str], kind: ErrorKind, code: int, stderr: bool) -> None:
     result = CMD.try_get_matches_from(["tool", *args])
     assert isinstance(result, Error)
     assert (result.kind, result.exit_code, result.use_stderr) == (kind, code, stderr)
@@ -199,3 +191,26 @@ def test_get_matches_reads_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.argv", ["tool", "in"])
     monkeypatch.setenv("TOKEN", "abc")
     assert CMD.get_matches().get_one("token", str) == "abc"
+
+
+def test_render_usage() -> None:
+    assert CMD.render_usage() == "Usage: tool [OPTIONS] <INPUT> [EXTRA]..."
+
+
+def test_missing_subcommand_error_lists_subcommands() -> None:
+    cli = Command("git").subcommand(Command("add")).subcommand_required(True)
+    result = cli.try_get_matches_from(["git"])
+    assert isinstance(result, Error)
+    assert result.render() == (
+        "error: 'git' requires a subcommand but one was not provided\n"
+        "  [subcommands: add, help]\n"
+        "\n"
+        "Usage: git [OPTIONS] <COMMAND>\n"
+        "\n"
+        "For more information, try '--help'.\n"
+    )
+
+
+def test_error_without_a_usage_or_help_hint() -> None:
+    error = Error(ValueValidation(), "something went wrong")
+    assert error.render() == "error: something went wrong\n"

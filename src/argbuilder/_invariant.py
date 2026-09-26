@@ -34,19 +34,13 @@ def variant_classes(alias: TypeAliasType) -> tuple[type, ...]:
     return tuple(classes)
 
 
-def check_variant(
-    value: object, classes: tuple[type, ...], union_name: str, what: str
-) -> None:
+def check_variant(value: object, classes: tuple[type, ...], union_name: str, what: str) -> None:
     """Panic unless `value` is an instance of one of the union's variant classes.
 
     Passing the class itself (`DisplayHelp` for `DisplayHelp()`) is the easy
     mistake with unit variants, so it gets its own hint.
     """
     if isinstance(value, type) and issubclass(value, classes):
-        call = (
-            f"{value.__name__}({'...' if getattr(value, '__match_args__', ()) else ''})"
-        )
+        call = f"{value.__name__}({'...' if getattr(value, '__match_args__', ()) else ''})"
         bug(f"{what}: pass {call}, an instance, not the class {value.__name__}")
-    invariant(
-        isinstance(value, classes), f"{what} must be an {union_name}, got {value!r}"
-    )
+    invariant(isinstance(value, classes), f"{what} must be an {union_name}, got {value!r}")

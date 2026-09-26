@@ -62,28 +62,20 @@ def render_help(cmd: ResolvedCommand, style: Style = PLAIN) -> str:
         lines += [*_wrap(cmd.about, style.width), ""]
     lines.append(f"{style.header('Usage:')} {render_usage(cmd)}")
     if cmd.subcommands:
-        rows = [
-            (name, _subcommand_details(sub)) for name, sub in cmd.subcommands.items()
-        ]
+        rows = [(name, _subcommand_details(sub)) for name, sub in cmd.subcommands.items()]
         lines += ["", style.header("Commands:"), *_table(rows, style)]
     visible = [arg for arg in cmd.args if not arg.hide]
-    positionals = [
-        (_positional_label(arg), _details(arg)) for arg in visible if arg.is_positional
-    ]
+    positionals = [(_positional_label(arg), _details(arg)) for arg in visible if arg.is_positional]
     if positionals:
         lines += ["", style.header("Arguments:"), *_table(positionals, style)]
-    options = [
-        (_option_label(arg), _details(arg)) for arg in visible if not arg.is_positional
-    ]
+    options = [(_option_label(arg), _details(arg)) for arg in visible if not arg.is_positional]
     if options:
         lines += ["", style.header("Options:"), *_table(options, style)]
     return "\n".join(lines) + "\n"
 
 
 def render_version(cmd: ResolvedCommand) -> str:
-    invariant(
-        cmd.version is not None, f"{' '.join(cmd.path)!r} has no version to render"
-    )
+    invariant(cmd.version is not None, f"{' '.join(cmd.path)!r} has no version to render")
     return f"{' '.join(cmd.path)} {cmd.version}\n"
 
 
@@ -111,9 +103,7 @@ def _details(arg: ResolvedArg) -> str:
     if arg.env is not None:
         parts.append(f"[env: {arg.env}]")
     if arg.visible_aliases:
-        parts.append(
-            f"[aliases: {', '.join(f'--{name}' for name in arg.visible_aliases)}]"
-        )
+        parts.append(f"[aliases: {', '.join(f'--{name}' for name in arg.visible_aliases)}]")
     if arg.visible_short_aliases:
         shorts = ", ".join(f"-{char}" for char in arg.visible_short_aliases)
         parts.append(f"[short aliases: {shorts}]")
@@ -162,8 +152,6 @@ def _wrap(text: str, width: int | None) -> list[str]:
         return [text]
     lines: list[str] = []
     for line in text.splitlines():
-        pieces = textwrap.wrap(
-            line, width, break_long_words=False, break_on_hyphens=False
-        )
+        pieces = textwrap.wrap(line, width, break_long_words=False, break_on_hyphens=False)
         lines.extend(pieces or [""])
     return lines

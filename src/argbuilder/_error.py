@@ -174,20 +174,18 @@ def describe(kind: ParseFailure) -> str:
             return f"the argument '{argument}' cannot be used multiple times"
         case ArgumentConflict(argument, other):
             return f"the argument '{argument}' cannot be used with '{other}'"
-        case MissingRequiredArgument(arguments):
-            listed = "\n".join(f"  {shown}" for shown in arguments)
-            return f"the following required arguments were not provided:\n{listed}"
         case MissingSubcommand(command, subcommands):
             return (
                 f"'{command}' requires a subcommand but one was not provided\n"
                 f"  [subcommands: {', '.join(subcommands)}]"
             )
+        case MissingRequiredArgument(arguments):  # pragma: no branch
+            listed = "\n".join(f"  {shown}" for shown in arguments)
+            return f"the following required arguments were not provided:\n{listed}"
 
 
 def _where(argument: str, env: str | None) -> str:
-    return f"'{argument}'" + (
-        "" if env is None else f" (from environment variable {env})"
-    )
+    return f"'{argument}'" + ("" if env is None else f" (from environment variable {env})")
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,9 +200,7 @@ class Error:
     tip: str | None = None
     usage: str | None = None
     help_hint: str | None = None
-    restyle: Callable[[Style], str] | None = field(
-        default=None, repr=False, compare=False
-    )
+    restyle: Callable[[Style], str] | None = field(default=None, repr=False, compare=False)
     """Renders `message` again for a given `Style`. Set for help, which can wrap and color."""
 
     def __post_init__(self) -> None:

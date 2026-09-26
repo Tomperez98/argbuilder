@@ -112,9 +112,7 @@ class ValueParser[T]:
     @staticmethod
     def choices(*values: str) -> ValueParser[str]:
         """One of a closed set of strings, matched exactly."""
-        invariant(
-            len(values) > 0, "ValueParser.choices: needs at least one possible value"
-        )
+        invariant(len(values) > 0, "ValueParser.choices: needs at least one possible value")
         invariant(
             all(isinstance(value, str) for value in values),
             f"ValueParser.choices: possible values must be str, got {values!r}",
@@ -126,11 +124,7 @@ class ValueParser[T]:
         accepted = frozenset(values)
 
         def parse(raw: str) -> str | Invalid:
-            return (
-                raw
-                if raw in accepted
-                else Invalid(f"expected one of {', '.join(values)}")
-            )
+            return raw if raw in accepted else Invalid(f"expected one of {', '.join(values)}")
 
         return ValueParser(parse, values)
 
@@ -184,10 +178,7 @@ def into_value_parser(like: object) -> ValueParser[Any]:
         return ValueParser.from_fn(like)
     if isinstance(like, Sequence):
         return ValueParser.choices(*like)
-    bug(
-        f"value_parser({like!r}): expected a ValueParser, callable, range, Literal, or list of str"
-    )
-    return None
+    bug(f"value_parser({like!r}): expected a ValueParser, callable, range, Literal, or list of str")
 
 
 _MAX_ALIAS_DEPTH = 16
@@ -200,10 +191,7 @@ def _unalias(like: object) -> object:
         if not isinstance(like, TypeAliasType):
             return like
         like = like.__value__
-    bug(
-        f"value_parser(): type alias chain is deeper than {_MAX_ALIAS_DEPTH}; is it recursive?"
-    )
-    return None
+    bug(f"value_parser(): type alias chain is deeper than {_MAX_ALIAS_DEPTH}; is it recursive?")
 
 
 def parse_boolish(raw: str) -> bool | Invalid:
