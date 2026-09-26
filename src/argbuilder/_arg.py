@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, overload
+from collections.abc import Iterable
+from typing import Any, overload
 
 from argbuilder._invariant import bug, invariant
 from argbuilder._spec import ArgAction, ArgSpec, GroupSpec, check_action
 from argbuilder._value_parser import ValueParserLike, into_value_parser
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 
 def _check_bool(owner: str, method: str, value: object) -> bool:
@@ -24,6 +22,14 @@ def _check_id(kind: str, value: object) -> str:
         f"{kind} id must be a non-empty str, got {value!r}",
     )
     return str(value)
+
+
+def _check_iterable(owner: str, method: str, value: object) -> None:
+    """A str is iterable but almost never what a `*_all`/`args` list wants."""
+    invariant(
+        isinstance(value, Iterable) and not isinstance(value, str),
+        f"{owner}.{method}() takes an iterable, got {value!r}",
+    )
 
 
 class Arg:
@@ -154,6 +160,7 @@ class Arg:
         return self.default_values([value])
 
     def default_values(self, values: Iterable[str]) -> Arg:
+        _check_iterable(self._owner, "default_values", values)
         collected = tuple(values)
         invariant(
             len(collected) > 0 and all(isinstance(value, str) for value in collected),
@@ -181,6 +188,7 @@ class Arg:
         return self._with(conflicts_with=self._spec.conflicts_with | {_check_id("Arg", id)})
 
     def conflicts_with_all(self, ids: Iterable[str]) -> Arg:
+        _check_iterable(self._owner, "conflicts_with_all", ids)
         checked = {_check_id("Arg", id) for id in ids}
         return self._with(conflicts_with=self._spec.conflicts_with | checked)
 
@@ -259,6 +267,7 @@ class ArgGroup:
         return self.args([id])
 
     def args(self, ids: Iterable[str]) -> ArgGroup:
+        _check_iterable(f"ArgGroup({self._spec.id!r})", "args", ids)
         members = self._spec.args + tuple(_check_id("Arg", id) for id in ids)
         invariant(
             len(set(members)) == len(members),
