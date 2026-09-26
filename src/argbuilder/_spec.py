@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import difflib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
@@ -29,6 +28,8 @@ def check_action(owner: str, value: object) -> ArgAction:
     for action in ARG_ACTIONS:
         if value == action:
             return action
+    import difflib
+
     close = difflib.get_close_matches(str(value).lower(), ARG_ACTIONS, n=1)
     hint = f"; did you mean {close[0]!r}?" if close else ""
     bug(f"{owner}.action() takes one of {', '.join(ARG_ACTIONS)}, got {value!r}{hint}")

@@ -396,6 +396,8 @@ def test_requires() -> None:
     )
     assert "--password <PASSWORD>" in err(cmd, "--user", "u").message
     assert ok(cmd, "--user", "u", "--password", "p").get_one("user", str) == "u"
+    # Absent, a requiring argument does not demand its dependency.
+    assert ok(cmd).get_one("user", str) is None
 
 
 def test_groups() -> None:

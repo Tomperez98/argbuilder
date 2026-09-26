@@ -116,6 +116,14 @@ class ResolvedCommand:
     by_short: Mapping[str, ResolvedArg]
     by_long: Mapping[str, ResolvedArg]
     positionals: tuple[ResolvedArg, ...]
+    arity_mins: tuple[tuple[ResolvedArg, int], ...]
+    """Positionals with `min_values > 0`, precomputed so validation is O(given)."""
+    required_args: tuple[ResolvedArg, ...]
+    """Args with `required(True)`, precomputed for the missing-argument check."""
+    conflicting_args: tuple[ResolvedArg, ...]
+    """Args with a non-empty `conflicts_with`, precomputed for the conflict check."""
+    requiring_args: tuple[ResolvedArg, ...]
+    """Args with a non-empty `requires`, precomputed for the requires check."""
     groups: tuple[ResolvedGroup, ...]
     subcommands: Mapping[str, ResolvedCommand]
     """By canonical name, in definition order, the auto `help` subcommand last."""
@@ -245,6 +253,12 @@ def _build(
         groups.append(ResolvedGroup(group.id, group.args, group.required, group.multiple))
 
     globals_ = tuple(arg for arg in args if arg.global_)  # inherited ones first
+    # Precompute the subsets `_validate` needs, so a parse scans every argument
+    # only once (in the matched loop), not four times including auto/hidden ones.
+    arity_mins = tuple((arg, arg.min_values) for arg in positionals if arg.min_values > 0)
+    required_args = tuple(arg for arg in args if arg.required)
+    conflicting_args = tuple(arg for arg in args if arg.conflicts_with)
+    requiring_args = tuple(arg for arg in args if arg.requires)
     subcommands: dict[str, ResolvedCommand] = {}
     subcommand_names: dict[str, str] = {}
     for sub in spec.subcommands:
@@ -282,6 +296,10 @@ def _build(
         by_short=MappingProxyType(by_short),
         by_long=MappingProxyType(by_long),
         positionals=positionals,
+        arity_mins=arity_mins,
+        required_args=required_args,
+        conflicting_args=conflicting_args,
+        requiring_args=requiring_args,
         groups=tuple(groups),
         subcommands=MappingProxyType(subcommands),
         subcommand_names=MappingProxyType(subcommand_names),

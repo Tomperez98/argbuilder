@@ -35,7 +35,6 @@ later in the module).
 from __future__ import annotations
 
 import dataclasses
-import inspect
 import os
 import re
 import sys
@@ -707,6 +706,8 @@ def _about(doc: str | None) -> str | None:
     """The docstring's first paragraph on one line, a lone trailing period dropped (as clap)."""
     if not doc:
         return None
+    import inspect
+
     first = inspect.cleandoc(doc).split("\n\n", 1)[0]
     text = " ".join(first.split())
     return text.removesuffix(".") if text.count(". ") == 0 else text
