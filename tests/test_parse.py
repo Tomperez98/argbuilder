@@ -59,7 +59,11 @@ def test_absent_option_is_none() -> None:
 
 
 def test_set_twice_is_a_conflict() -> None:
-    assert isinstance(err(VALUE, "-n", "a", "-n", "b").kind, ArgumentConflict)
+    error = err(VALUE, "-n", "a", "-n", "b")
+    assert error.kind == ArgumentConflict("--name <NAME>", None)
+    # None means "repeated", so the wording must not fall through to the
+    # two-argument branch and print "cannot be used with 'None'."
+    assert error.message == "the argument '--name <NAME>' cannot be used multiple times"
 
 
 def test_missing_value() -> None:
@@ -289,6 +293,28 @@ def test_value_parser_shorthands() -> None:
     assert isinstance(err(cmd, "--dry", "no").kind, InvalidValue)
 
 
+def test_integer_parser_bound_shapes() -> None:
+    # Equal bounds are legal and either bound may be omitted; a mutant of the
+    # `min <= max` guard or its short-circuit must not slip through.
+    assert ValueParser.integer(5, 5).parse("5") == 5
+    assert ValueParser.integer(1).parse("1") == 1
+    assert ValueParser.integer(max=9).parse("9") == 9
+    assert isinstance(ValueParser.integer(1).parse("0"), Invalid)
+    with pytest.raises(AssertionError, match="greater than max"):
+        ValueParser.integer(5, 1)
+
+
+def test_boolean_parser_lists_its_alphabet_and_rejects_other_spellings() -> None:
+    # Help and errors read `possible_values`; the parser is exact, unlike
+    # `bool("false")`, so its alphabet and message are part of the contract.
+    parser = ValueParser.boolean()
+    assert parser.possible_values == ("true", "false")
+    assert parser.parse("true") is True
+    assert parser.parse("false") is False
+    assert parser.parse("True") == Invalid("expected 'true' or 'false'")
+    assert parser.parse("") == Invalid("expected 'true' or 'false'")
+
+
 def test_possible_values_error_and_tip() -> None:
     cmd = Command("prog").arg(Arg("mode").long("mode").value_parser(["fast", "safe"]))
     error = err(cmd, "--mode", "saf")
@@ -360,6 +386,15 @@ def test_env_flag() -> None:
     assert isinstance(err(cmd, env={"DEBUG": "maybe"}).kind, InvalidValue)
 
 
+def test_env_can_turn_a_flag_off() -> None:
+    # For action "set_false" a truthy variable leaves the flag at its default
+    # (False) and a falsy one sets it True, the opposite of "set_true"; the
+    # branch must not return the raw bool for both actions.
+    cmd = Command("prog").arg(Arg("clean").long("clean").action("set_false").env("CLEAN"))
+    assert not ok(cmd, env={"CLEAN": "1"}).get_flag("clean")
+    assert ok(cmd, env={"CLEAN": "0"}).get_flag("clean")
+
+
 def test_env_satisfies_required() -> None:
     cmd = Command("prog").arg(Arg("token").long("token").required(True).env("TOKEN"))
     assert ok(cmd, env={"TOKEN": "t"}).get_one("token", str) == "t"
@@ -388,6 +423,35 @@ def test_conflicts_are_symmetric_and_ignore_defaults() -> None:
     assert ok(cmd, "--json").get_flag("json")
 
 
+def test_conflicts_with_all_adds_to_the_conflicts_already_set() -> None:
+    # `conflicts_with` and `conflicts_with_all` accumulate; an `&` instead of
+    # `|` would drop both the earlier conflict and the new ones.
+    cmd = (
+        Command("prog")
+        .arg(
+            Arg("a").long("a").action("set_true").conflicts_with("b").conflicts_with_all(["c", "d"])
+        )
+        .arg(Arg("b").long("b").action("set_true"))
+        .arg(Arg("c").long("c").action("set_true"))
+        .arg(Arg("d").long("d").action("set_true"))
+    )
+    for other in ("--b", "--c", "--d"):
+        assert isinstance(err(cmd, "--a", other).kind, ArgumentConflict)
+
+
+def test_conflict_check_skips_absent_arguments_without_stopping() -> None:
+    # `--absent` is a conflicting argument that was not given, so the loop must
+    # `continue` past it; a `break` would stop before `--a` and hide its
+    # conflict with `--b`.
+    cmd = (
+        Command("prog")
+        .arg(Arg("absent").long("absent").action("set_true").conflicts_with("b"))
+        .arg(Arg("a").long("a").action("set_true").conflicts_with("b"))
+        .arg(Arg("b").long("b").action("set_true"))
+    )
+    assert isinstance(err(cmd, "--a", "--b").kind, ArgumentConflict)
+
+
 def test_requires() -> None:
     cmd = (
         Command("prog")
@@ -398,6 +462,23 @@ def test_requires() -> None:
     assert ok(cmd, "--user", "u", "--password", "p").get_one("user", str) == "u"
     # Absent, a requiring argument does not demand its dependency.
     assert ok(cmd).get_one("user", str) is None
+
+
+def test_requires_lists_every_dependency_from_every_requiring_argument() -> None:
+    # `--absent` comes first and is not given, so the loop must `continue` past
+    # it, not `break`: a break would hide the two present arguments' missing
+    # dependencies and the parse would wrongly succeed.
+    cmd = (
+        Command("prog")
+        .arg(Arg("absent").long("absent").requires("password"))
+        .arg(Arg("user").long("user").requires("password"))
+        .arg(Arg("host").long("host").requires("port"))
+        .arg(Arg("password").long("password"))
+        .arg(Arg("port").long("port"))
+    )
+    error = err(cmd, "--user", "u", "--host", "h")
+    assert isinstance(error.kind, MissingRequiredArgument)
+    assert error.kind.arguments == ("--password <PASSWORD>", "--port <PORT>")
 
 
 def test_groups() -> None:

@@ -12,5 +12,8 @@ wheels/
 
 .coverage
 
+# Mutation-testing working copy and results (mutmut)
+mutants/
+
 # Smoke-test venv created by `mise run smoke`
 .smoke/

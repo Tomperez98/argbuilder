@@ -1,6 +1,6 @@
 [project]
 name = "argbuilder"
-version = "0.1.3"
+version = "1.0.0"
 description = "Typed command-line parsing where definition bugs fail at once and user mistakes return values. No dependencies."
 readme = "README.md"
 license = "MIT"
@@ -29,6 +29,8 @@ Changelog = "https://github.com/Tomperez98/argbuilder/releases"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.168.1",
+    "mutmut>=3.8.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.9",
@@ -40,6 +42,9 @@ requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
+# Keep collection on the real suite: mutmut's `mutants/` working copy contains a
+# second `tests/` tree and its own conftest, which would collide otherwise.
+testpaths = ["tests"]
 addopts = "--cov=src --cov-report=term-missing --cov-report=term"
 
 [tool.coverage.run]
@@ -50,3 +55,15 @@ source = ["src"]
 show_missing = true
 skip_empty = true
 fail_under = 100
+
+# Mutation testing (local; `mise run mutation`). Line and branch coverage say
+# branch coverage say every arm *runs*; mutation says the assertions would
+# *notice* if an arm changed. Scope is the whole package, minus the pure
+# re-export module. `addopts=` drops the 100%-coverage gate for mutant runs —
+# a mutant legitimately lowers coverage, and the gate would kill every mutant
+# for the wrong reason, making the score meaningless.
+[tool.mutmut]
+source_paths = ["src/argbuilder"]
+do_not_mutate = ["src/argbuilder/__init__.py"]
+also_copy = ["examples/"]
+pytest_add_cli_args = ["-o", "addopts=", "-p", "no:cacheprovider"]
