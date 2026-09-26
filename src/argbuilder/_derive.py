@@ -215,7 +215,7 @@ class Args:
 
 
 _PARSER_METHODS = frozenset(
-    {"parse", "parse_from", "try_parse_from", "from_arg_matches", "to_command"}
+    {"parse", "parse_from", "try_parse_from", "from_arg_matches", "to_command"},
 )
 
 
@@ -386,7 +386,7 @@ def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
     except NameError as exc:
         exc.add_note(
             f"argbuilder: resolving the annotations of {cls.__qualname__}; "
-            f"classes and type aliases they name must be defined at module level"
+            f"classes and type aliases they name must be defined at module level",
         )
         raise
     args: list[Arg] = []

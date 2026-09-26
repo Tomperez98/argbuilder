@@ -164,7 +164,7 @@ class ArgMatches:
             getter = "get_count" if arg.action == "count" else "get_flag"
             bug(
                 f"{method}({id!r}): argument uses action {arg.action!r} "
-                f"and holds no value; use {getter}({id!r})"
+                f"and holds no value; use {getter}({id!r})",
             )
         return arg
 
@@ -197,5 +197,5 @@ def _checked[T](id: str, value: object, type_: type[T]) -> T:
         return value
     bug(
         f"argument {id!r} holds {type(value).__name__}, not {type_.__name__}; "
-        f"check its value_parser()"
+        f"check its value_parser()",
     )

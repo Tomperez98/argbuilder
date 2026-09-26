@@ -198,7 +198,7 @@ def test_optional_value_with_default_missing() -> None:
         .long("color")
         .num_args(0, 1)
         .default_value("auto")
-        .default_missing_value("always")
+        .default_missing_value("always"),
     )
     assert ok(cmd).get_one("color", str) == "auto"
     assert ok(cmd, "--color").get_one("color", str) == "always"
@@ -215,10 +215,12 @@ def test_optional_value_with_default_missing() -> None:
     ],
 )
 def test_get_required_on_a_defaulted_arg(
-    argv: list[str], env: dict[str, str], expected: int
+    argv: list[str],
+    env: dict[str, str],
+    expected: int,
 ) -> None:
     cmd = Command("prog").arg(
-        Arg("port").long("port").value_parser(int).env("PORT").default_value("22")
+        Arg("port").long("port").value_parser(int).env("PORT").default_value("22"),
     )
     assert ok(cmd, *argv, env=env).get_required("port", int) == expected
 
@@ -347,7 +349,7 @@ def test_custom_parser_bug_propagates() -> None:
 # -- environment and defaults ---------------------------------------------------
 
 PORT = Command("prog").arg(
-    Arg("port").long("port").value_parser(int).env("PORT").default_value("22")
+    Arg("port").long("port").value_parser(int).env("PORT").default_value("22"),
 )
 
 
@@ -429,7 +431,11 @@ def test_conflicts_with_all_adds_to_the_conflicts_already_set() -> None:
     cmd = (
         Command("prog")
         .arg(
-            Arg("a").long("a").action("set_true").conflicts_with("b").conflicts_with_all(["c", "d"])
+            Arg("a")
+            .long("a")
+            .action("set_true")
+            .conflicts_with("b")
+            .conflicts_with_all(["c", "d"]),
         )
         .arg(Arg("b").long("b").action("set_true"))
         .arg(Arg("c").long("c").action("set_true"))
@@ -548,13 +554,13 @@ LEVELS = (
     .subcommand(
         Command("push")
         .arg(Arg("force").short("f").long("force").action("set_true"))
-        .arg(Arg("secret").long("secret").hide(True))
+        .arg(Arg("secret").long("secret").hide(True)),
     )
     .subcommand(Command("fetch").arg(Arg("all").long("all").action("set_true")))
     .subcommand(
         Command("remote")
         .subcommand(Command("add").arg(Arg("all").long("all").action("set_true")))
-        .subcommand(Command("prune").arg(Arg("dry").long("dry-run").action("set_true")))
+        .subcommand(Command("prune").arg(Arg("dry").long("dry-run").action("set_true"))),
     )
 )
 
@@ -598,7 +604,7 @@ GLOBAL = (
         Command("remote")
         .arg(Arg("dry").long("dry-run").action("set_true").global_(True))
         .subcommand(Command("add").arg(Arg("name")))
-        .subcommand(Command("prune"))
+        .subcommand(Command("prune")),
     )
 )
 
@@ -808,7 +814,9 @@ KINDS = (
     ],
 )
 def test_error_kind_carries_what_went_wrong(
-    argv: list[str], env: dict[str, str], kind: ErrorKind
+    argv: list[str],
+    env: dict[str, str],
+    kind: ErrorKind,
 ) -> None:
     error = err(KINDS, *argv, env=env)
     assert error.kind == kind

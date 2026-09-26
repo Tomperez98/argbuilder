@@ -40,7 +40,9 @@ if TYPE_CHECKING:
 
 
 def parse(
-    cmd: ResolvedCommand, tokens: Sequence[str], env: Mapping[str, str]
+    cmd: ResolvedCommand,
+    tokens: Sequence[str],
+    env: Mapping[str, str],
 ) -> ArgMatches | Error:
     """Parse the tokens after the command name. Recurses once per subcommand level."""
     return _Parser(cmd, env, (), {}).run(tokens)
@@ -162,7 +164,8 @@ class _Parser:
         if arg is None:
             if self._pending_last() is not None:
                 return self._error(
-                    UnknownArgument(token), tip=f"to pass '{token}' as a value, use '-- {token}'"
+                    UnknownArgument(token),
+                    tip=f"to pass '{token}' as a value, use '-- {token}'",
                 )
             if self._cmd.subcommands:
                 closest = _closest(token, _visible_subcommand_names(self._cmd))
@@ -215,7 +218,11 @@ class _Parser:
         return next_index
 
     def _take_values(
-        self, arg: ResolvedArg, inline: str | None, tokens: Sequence[str], index: int
+        self,
+        arg: ResolvedArg,
+        inline: str | None,
+        tokens: Sequence[str],
+        index: int,
     ) -> int | Error:
         if inline is not None:
             raws = [inline]
@@ -251,7 +258,10 @@ class _Parser:
         return index
 
     def _parse_values(
-        self, arg: ResolvedArg, raws: list[str], env: str | None
+        self,
+        arg: ResolvedArg,
+        raws: list[str],
+        env: str | None,
     ) -> list[Any] | Error:
         """Split, count-check and parse raw strings. `env` names the variable they came from."""
         parser = arg.parser

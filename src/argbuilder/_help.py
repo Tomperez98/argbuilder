@@ -51,7 +51,10 @@ def render_usage(cmd: ResolvedCommand) -> str:
 
 
 def usage_error(
-    cmd: ResolvedCommand, kind: ErrorKind, message: str, tip: str | None = None
+    cmd: ResolvedCommand,
+    kind: ErrorKind,
+    message: str,
+    tip: str | None = None,
 ) -> Error:
     """An error that points at `cmd`'s usage and help flag."""
     return Error(kind, message, tip, render_usage(cmd), cmd.help_hint)

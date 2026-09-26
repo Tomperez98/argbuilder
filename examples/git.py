@@ -22,7 +22,7 @@ def cli() -> Command:
             .long("verbose")
             .action("count")
             .global_(True)
-            .help("More output per occurrence")
+            .help("More output per occurrence"),
         )
         .arg(
             Arg("color")
@@ -32,13 +32,13 @@ def cli() -> Command:
             .default_value("auto")
             .alias("colour")
             .global_(True)
-            .help("Colorize output")
+            .help("Colorize output"),
         )
         .subcommand(
             Command("clone")
             .about("Clones repos")
             .arg(Arg("remote").required(True).help("The remote to clone"))
-            .arg(Arg("dir").value_parser(Path).help("Where to clone into"))
+            .arg(Arg("dir").value_parser(Path).help("Where to clone into")),
         )
         .subcommand(
             Command("push")
@@ -50,15 +50,15 @@ def cli() -> Command:
                 .long("port")
                 .value_parser(range(1, 65536))
                 .env("GIT_PORT")
-                .default_value("22")
+                .default_value("22"),
             )
-            .arg(Arg("force").short("f").long("force").action("set_true"))
+            .arg(Arg("force").short("f").long("force").action("set_true")),
         )
         .subcommand(
             Command("add")
             .about("Adds things")
             .visible_alias("stage")
-            .arg(Arg("paths").action("append").required(True).value_parser(Path))
+            .arg(Arg("paths").action("append").required(True).value_parser(Path)),
         )
     )
 

@@ -149,7 +149,9 @@ PRECEDENCE: list[tuple[str, Callable[[], Command], list[str], type[object]]] = [
     ids=[name for name, _, _, _ in PRECEDENCE],
 )
 def test_the_first_failure_wins(
-    build: Callable[[], Command], argv: list[str], kind: type[object]
+    build: Callable[[], Command],
+    argv: list[str],
+    kind: type[object],
 ) -> None:
     assert isinstance(err(build(), *argv).kind, kind)
 
@@ -170,7 +172,12 @@ def test_an_over_long_env_value_reports_the_variable() -> None:
 def test_an_invalid_env_choice_reports_the_variable_and_suggests() -> None:
     cmd = Command("p").arg(Arg("mode").long("mode").value_parser(["fast", "safe"]).env("MODE"))
     assert err(cmd, env={"MODE": "saf"}).kind == InvalidValue(
-        "--mode <MODE>", "saf", "expected one of fast, safe", ("fast", "safe"), "safe", "MODE"
+        "--mode <MODE>",
+        "saf",
+        "expected one of fast, safe",
+        ("fast", "safe"),
+        "safe",
+        "MODE",
     )
 
 
@@ -258,7 +265,9 @@ def test_usage_lists_required_options_before_positionals_and_commands() -> None:
     ],
 )
 def test_value_hint_covers_every_arity_shape(
-    min_values: int, max_values: int | None, hint: str
+    min_values: int,
+    max_values: int | None,
+    hint: str,
 ) -> None:
     cmd = Command("p").arg(Arg("x").long("x").num_args(min_values, max_values))
     arg = cmd._resolved().by_long["x"]  # noqa: SLF001

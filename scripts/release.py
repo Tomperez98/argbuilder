@@ -129,7 +129,7 @@ def cmd_tag() -> None:
     tag = f"v{version}"
     if git("tag", "--list", tag):
         fail(
-            f"tag {tag} already exists; bump the version in a PR first (`uv version --bump patch`)"
+            f"tag {tag} already exists; bump the version in a PR first (`uv version --bump patch`)",
         )
     if git("ls-remote", "--tags", "origin", f"refs/tags/{tag}"):
         fail(f"tag {tag} already exists on origin")
@@ -165,11 +165,14 @@ def cmd_smoke(version: str, examples: str) -> None:
         fail(f"no examples found in {examples}")
     for script in scripts:
         result = subprocess.run(
-            [sys.executable, str(script), "--help"], capture_output=True, text=True, check=False
+            [sys.executable, str(script), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode != 0 or "Usage:" not in result.stdout:
             fail(
-                f"{script.name} --help exited {result.returncode}:\n{result.stdout}{result.stderr}"
+                f"{script.name} --help exited {result.returncode}:\n{result.stdout}{result.stderr}",
             )
     say(f"{PACKAGE} {installed} from {location.parent}: {len(scripts)} examples ran")
 
@@ -189,7 +192,7 @@ def cmd_preflight(version: str) -> None:
         if local.get(name) != digest:
             fail(
                 f"{name} on PyPI has sha256 {digest}, dist/ has {local.get(name)}; "
-                f"{version} is taken, bump the version"
+                f"{version} is taken, bump the version",
             )
     missing = sorted(set(local) - set(published))
     say(f"{version} is already on PyPI with the same bytes; still to upload: {missing or 'none'}")
@@ -208,7 +211,7 @@ def cmd_verify_pypi(version: str) -> None:
         if time.monotonic() > deadline:
             fail(
                 f"after {PROPAGATION_TIMEOUT_S}s PyPI has {sorted(published)} for {version} "
-                f"(expected {sorted(local)}) and latest={latest} (expected {version})"
+                f"(expected {sorted(local)}) and latest={latest} (expected {version})",
             )
         time.sleep(POLL_INTERVAL_S)
     for name, digest in local.items():
@@ -225,7 +228,7 @@ def cmd_notes(version: str) -> None:
     say(
         f"Requires Python {project['requires-python']}. No dependencies.\n\n"
         f"```\npip install {PACKAGE}=={version}\n```\n\n"
-        f"PyPI: https://pypi.org/project/{PACKAGE}/{version}/"
+        f"PyPI: https://pypi.org/project/{PACKAGE}/{version}/",
     )
 
 
