@@ -1,6 +1,7 @@
 # argbuilder
 
 [![CI](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml/badge.svg)](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/argbuilder)](https://pypi.org/project/argbuilder/)
 
 Build command-line interfaces in Python from typed, immutable builders — the
 [clap] model.
@@ -144,7 +145,14 @@ runtime-evaluated-base-classes = ["argbuilder.Parser", "argbuilder.Args"]
 
 ## Install
 
-Not on PyPI yet; install from source:
+```bash
+uv add argbuilder
+# or
+pip install argbuilder
+```
+
+Python 3.12+ and no dependencies. To track an unreleased `main` instead of a
+release:
 
 ```bash
 uv add git+https://github.com/Tomperez98/argbuilder
@@ -156,7 +164,7 @@ pip install "argbuilder @ git+https://github.com/Tomperez98/argbuilder"
 
 | Who made the mistake | Example | What happens |
 |---|---|---|
-| **You**, defining the CLI | two args claim `-v`, `required(True)` plus a default, a default the parser rejects, `short("ab")` | `AssertionError`, naming the command and argument. Builder-local mistakes fail at the builder call, cross-argument ones at build. Raised explicitly, so `python -O` doesn't strip them. |
+| **You**, defining the CLI | two args claim `-v`, `required(True)` plus a default, a default the parser rejects, `short("ab")`, an argument reusing the reserved id `help` / `version` | `AssertionError`, naming the command and argument. Builder-local mistakes fail at the builder call, cross-argument ones at build. Raised explicitly, so `python -O` doesn't strip them. |
 | **You**, reading matches | unknown id, `get_one("port", str)` on an int, `get_one` on an `Append` arg, `get_flag` on a value arg, `get_required` on an arg that can be absent | `AssertionError` at the call |
 | **The user**, typing the command | unknown flag, bad value, missing required arg, `--help` | `try_get_matches_from` **returns** an `Error`. `get_matches` prints it and exits (0 for help/version, 2 otherwise). |
 
@@ -279,6 +287,10 @@ Also supported: `env`, `default_value(s)`, `default_missing_value`,
 subcommands and values, and a tip when an option is used at the wrong level
 (`git push -V`: "'-V' is an option of 'git'; put it before 'push'").
 
+`-h/--help` and `-V/--version` are added for you. `help` and `version` are
+reserved ids: an argument with one of them must use the matching `help` /
+`version` action (which replaces the automatic flag) or be renamed.
+
 A global option is read the same way at every level (`matches.get_count("verbose")`
 and `sub.get_count("verbose")` agree), and the whole command line counts as
 one list of occurrences. `git -v push -v` counts 2, and `append` values add up
@@ -289,16 +301,26 @@ only name other globals, because every subcommand has to be able to check them.
 
 ## Development
 
-CI runs the same checks on Python 3.12–3.14
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+Everything CI runs — lint, format, type check, the tests at 100% branch
+coverage, and a build-and-import smoke test of the wheel — is one
+[`mise`](https://mise.jdx.dev) task:
 
 ```bash
-uv run pytest      # tests
-uv run ruff check  # lint
-uv run ty check    # type check
+mise run ci
 ```
 
-Releases publish to PyPI from CI when a `v*` tag is pushed
+The pieces on their own:
+
+```bash
+uv run ruff check           # lint
+uv run ruff format --check  # format
+uv run ty check             # type check
+uv run pytest               # tests
+```
+
+CI runs the fast checks once and the tests on Python 3.12–3.14
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Releases publish to
+PyPI from CI when a `v*` tag is pushed
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
 [clap]: https://docs.rs/clap/latest/clap/_tutorial/index.html

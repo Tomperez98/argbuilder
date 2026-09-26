@@ -17,6 +17,7 @@ from argbuilder import (
     InvalidValue,
     ValueParser,
     ValueValidation,
+    arg,
 )
 from argbuilder._invariant import variant_classes
 from argbuilder._value_parser import into_value_parser
@@ -47,9 +48,16 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: ValueParser.integer(5, 1), "greater than max"),
     (lambda: ValueParser.from_range(range(5, 5)), "is empty"),
     (lambda: ArgGroup("g").args(["a", "a"]), "duplicate members"),
+    (lambda: Arg("x").default_values(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
+    (lambda: Arg("x").default_values("22"), "takes an iterable"),
+    (lambda: Arg("x").conflicts_with_all(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
+    (lambda: ArgGroup("g").args(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
+    (lambda: arg(requires=42), "takes a str or a list of str"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("my tool"), "without spaces"),
     (lambda: Command("x").arg("verbose"), "takes an Arg"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("x").args(Arg("a")), "use .arg"),  # ty: ignore[invalid-argument-type]
+    (lambda: Command("x").args(5), "takes a list of Arg"),  # ty: ignore[invalid-argument-type]
+    (lambda: Command("x").subcommands(5), "takes a list of Command"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("v").action("Count"), "did you mean 'count'"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("v").action(3), "takes one of set, append"),  # ty: ignore[invalid-argument-type]
     (lambda: Error(InvalidValue, "x"), r"pass InvalidValue\(\.\.\.\)"),  # ty: ignore[invalid-argument-type]
@@ -287,6 +295,13 @@ def test_argv_misuse() -> None:
         Command("x").try_get_matches_from([])
     with panics("must hold str"):
         Command("x").try_get_matches_from(["x", 1])  # ty: ignore[invalid-argument-type]
+
+
+def test_env_misuse() -> None:
+    with panics("mapping of str to str"):
+        Command("x").try_get_matches_from(["x"], env=None)  # ty: ignore[invalid-argument-type]
+    with panics("mapping of str to str"):
+        Command("x").try_get_matches_from(["x"], env={"A": 1})  # ty: ignore[invalid-argument-type]
 
 
 # -- reading matches wrong ------------------------------------------------------

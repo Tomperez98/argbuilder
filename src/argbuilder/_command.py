@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import sys
+from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -19,8 +20,6 @@ from argbuilder._spec import CommandSpec
 from argbuilder._style import PLAIN, Style
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
     from argbuilder._matches import ArgMatches
 
 _NO_ENV: Mapping[str, str] = MappingProxyType({})
@@ -100,6 +99,10 @@ class Command:
             not isinstance(args, Arg),
             f"{self!r}.args() takes a list; use .arg() for one",
         )
+        invariant(
+            isinstance(args, Iterable) and not isinstance(args, str),
+            f"{self!r}.args() takes a list of Arg, got {args!r}",
+        )
         result = self
         for arg in args:
             result = result.arg(arg)
@@ -124,6 +127,10 @@ class Command:
         invariant(
             not isinstance(commands, Command),
             f"{self!r}.subcommands() takes a list; use .subcommand() for one",
+        )
+        invariant(
+            isinstance(commands, Iterable) and not isinstance(commands, str),
+            f"{self!r}.subcommands() takes a list of Command, got {commands!r}",
         )
         result = self
         for command in commands:
@@ -178,6 +185,13 @@ class Command:
         invariant(
             all(isinstance(token, str) for token in tokens),
             f"argv must hold str, got {tokens!r}",
+        )
+        invariant(
+            isinstance(env, Mapping)
+            and all(
+                isinstance(name, str) and isinstance(value, str) for name, value in env.items()
+            ),
+            f"env must be a mapping of str to str, got {env!r}",
         )
         return parse(build(self._spec), tokens[1:], env)
 

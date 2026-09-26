@@ -178,6 +178,10 @@ def _names(what: str, names: str | Iterable[str]) -> tuple[str, ...]:
     """One name or several: `requires="config"` and `requires=["a", "b"]` both work."""
     if isinstance(names, str):
         return (names,)
+    invariant(
+        isinstance(names, Iterable),
+        f"arg({what}=...) takes a str or a list of str, got {names!r}",
+    )
     collected = tuple(names)
     invariant(
         all(isinstance(name, str) for name in collected),
