@@ -1,6 +1,6 @@
 [project]
 name = "argbuilder"
-version = "0.1.1"
+version = "0.1.2"
 description = "Typed command-line parsing where definition bugs fail at once and user mistakes return values. No dependencies."
 readme = "README.md"
 license = "MIT"
