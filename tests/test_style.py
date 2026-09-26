@@ -1,5 +1,9 @@
 """Terminal styling: wrap width and color, chosen at the edge, rendered purely."""
 
+from __future__ import annotations
+
+import os
+
 import pytest
 
 from argbuilder import (
@@ -11,7 +15,7 @@ from argbuilder import (
     ErrorKind,
     Style,
 )
-from argbuilder._style import MAX_WIDTH, MIN_WIDTH, style_for
+from argbuilder._style import MAX_WIDTH, MIN_WIDTH, style_for, terminal_style
 
 CMD = (
     Command("tool")
@@ -150,3 +154,24 @@ def _strip_ansi(text: str) -> str:
     for code in ("\x1b[1m", "\x1b[4m", "\x1b[31m", "\x1b[32m", "\x1b[0m"):
         text = text.replace(code, "")
     return text
+
+
+class _TtyStream:
+    """A stream that claims to be a terminal but has no size behind it."""
+
+    def isatty(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return 0
+
+
+def test_terminal_style_survives_an_unqueryable_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_size(fd: int) -> object:
+        raise OSError
+
+    monkeypatch.setattr("argbuilder._style.os.get_terminal_size", no_size)
+    style = terminal_style(_TtyStream())  # ty: ignore[invalid-argument-type]
+    assert style == style_for(is_tty=True, columns=None, env=os.environ)

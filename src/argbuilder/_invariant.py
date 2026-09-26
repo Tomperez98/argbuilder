@@ -1,5 +1,7 @@
 """Panics: the library's way of reporting bugs in the *caller's* program."""
 
+from __future__ import annotations
+
 from typing import NoReturn, TypeAliasType, get_args
 
 

@@ -1,5 +1,7 @@
 """Expected failures: every user mistake comes back as an `Error` value."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Literal
 
@@ -506,7 +508,11 @@ def _levels(matches: ArgMatches) -> list[ArgMatches]:
     ],
 )
 def test_global_count_adds_up_and_is_read_at_every_level(argv: list[str]) -> None:
-    assert [level.get_count("verbose") for level in _levels(ok(GLOBAL, *argv))] == [3, 3, 3]
+    assert [level.get_count("verbose") for level in _levels(ok(GLOBAL, *argv))] == [
+        3,
+        3,
+        3,
+    ]
 
 
 def test_global_append_keeps_command_line_order() -> None:
@@ -521,7 +527,10 @@ def test_global_value_sources_are_the_same_at_every_level() -> None:
         (["remote", "add", "--color", "always"], {}, ("always", "command_line")),
     ]:
         for level in _levels(ok(GLOBAL, *argv, env=env)):
-            assert (level.get_one("color", str), level.value_source("color")) == expected
+            assert (
+                level.get_one("color", str),
+                level.value_source("color"),
+            ) == expected
 
 
 def test_global_set_given_at_two_levels_is_used_twice() -> None:
@@ -573,7 +582,10 @@ def test_subcommand_aliases_report_the_canonical_name(name: str) -> None:
     [
         (["stag"], InvalidSubcommand("stag", "stage")),
         (["--colou"], UnknownArgument("--colou", "--colour")),
-        (["--tin"], UnknownArgument("--tin", None)),  # hidden aliases are never suggested
+        (
+            ["--tin"],
+            UnknownArgument("--tin", None),
+        ),  # hidden aliases are never suggested
     ],
 )
 def test_suggestions_offer_visible_aliases_only(argv: list[str], kind: ErrorKind) -> None:
@@ -662,7 +674,11 @@ KINDS = (
             ["in", "--mode", "saf"],
             {},
             InvalidValue(
-                "--mode <MODE>", "saf", "expected one of fast, safe", ("fast", "safe"), "safe"
+                "--mode <MODE>",
+                "saf",
+                "expected one of fast, safe",
+                ("fast", "safe"),
+                "safe",
             ),
         ),
         (["in", "--prot", "1"], {}, UnknownArgument("--prot", "--port")),
@@ -671,7 +687,11 @@ KINDS = (
         (["in", "--pair=a"], {}, TooFewValues("--pair <PAIR> <PAIR>", 2, 1)),
         (["in", "--force=yes"], {}, TooManyValues("--force", "yes")),
         (["in", "-f", "-f"], {}, ArgumentConflict("--force", None)),
-        (["in", "-f", "--mode", "fast"], {}, ArgumentConflict("--force", "--mode <MODE>")),
+        (
+            ["in", "-f", "--mode", "fast"],
+            {},
+            ArgumentConflict("--force", "--mode <MODE>"),
+        ),
         ([], {}, MissingRequiredArgument(("<INPUT>",))),
         (["in"], {}, MissingSubcommand("tool", ("run", "help"))),
     ],
@@ -687,6 +707,42 @@ def test_error_kind_carries_what_went_wrong(
 def test_error_kind_is_matchable() -> None:
     match err(KINDS, "in", "--port", "0").kind:
         case InvalidValue(argument=argument, value=value, reason=reason):
-            assert (argument, value, reason) == ("--port <PORT>", "0", "0 is not in 1..=99")
+            assert (argument, value, reason) == (
+                "--port <PORT>",
+                "0",
+                "0 is not in 1..=99",
+            )
         case other:
             pytest.fail(f"unexpected {other!r}")
+
+
+# -- remaining paths ------------------------------------------------------------
+
+
+def test_matches_repr_lists_values_and_subcommand() -> None:
+    assert repr(ok(VALUE, "--name", "x")) == "ArgMatches({'name': ('x',)}, subcommand=None)"
+    assert "subcommand=('clone', ArgMatches(" in repr(ok(GIT, "clone", "origin"))
+
+
+def test_too_many_values_after_a_delimiter_split() -> None:
+    cmd = Command("prog").arg(Arg("pair").long("pair").num_args(1, 2).value_delimiter(","))
+    assert isinstance(err(cmd, "--pair=a,b,c").kind, TooManyValues)
+
+
+def test_variadic_positional_too_few_values() -> None:
+    cmd = Command("prog").arg(Arg("files").num_args(2, 2))
+    assert isinstance(err(cmd, "a").kind, TooFewValues)
+
+
+def test_unbounded_option_stops_at_double_dash() -> None:
+    cmd = Command("prog").arg(Arg("files").long("files").num_args(0, None))
+    assert ok(cmd, "--files", "--").get_many("files", str) == ()
+
+
+def test_requires_a_required_argument_that_is_already_missing() -> None:
+    cmd = (
+        Command("prog").arg(Arg("a").long("a").requires("b")).arg(Arg("b").long("b").required(True))
+    )
+    error = err(cmd, "--a", "x")
+    assert isinstance(error.kind, MissingRequiredArgument)
+    assert error.kind.arguments.count("--b <B>") == 1

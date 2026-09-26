@@ -1,12 +1,16 @@
 """`Arg` and `ArgGroup`: fluent, immutable builders in the style of clap's builder API."""
 
+from __future__ import annotations
+
 import dataclasses
-from collections.abc import Iterable
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 from argbuilder._invariant import bug, invariant
 from argbuilder._spec import ArgAction, ArgSpec, GroupSpec, check_action
 from argbuilder._value_parser import ValueParserLike, into_value_parser
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def _check_bool(owner: str, method: str, value: object) -> bool:
@@ -45,7 +49,7 @@ class Arg:
         return self._spec.id
 
     def _with(self, **changes: Any) -> Arg:
-        new = Arg.__new__(Arg)
+        new: Arg = Arg.__new__(Arg)
         new._spec = dataclasses.replace(self._spec, **changes)
         return new
 
@@ -236,7 +240,7 @@ class ArgGroup:
         return f"ArgGroup({self._spec.id!r})"
 
     def _with(self, **changes: Any) -> ArgGroup:
-        new = ArgGroup.__new__(ArgGroup)
+        new: ArgGroup = ArgGroup.__new__(ArgGroup)
         new._spec = dataclasses.replace(self._spec, **changes)
         return new
 

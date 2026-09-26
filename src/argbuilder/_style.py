@@ -4,12 +4,16 @@ Rendering takes a `Style` as a plain parameter and stays pure. Only
 `terminal_style()` looks at the process, and only `Error.exit()` calls it.
 """
 
+from __future__ import annotations
+
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from argbuilder._invariant import invariant
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 MIN_WIDTH = 20
 """Narrowest wrap width. Anything smaller cannot fit a flag and its help."""
@@ -94,6 +98,6 @@ def terminal_style(stream: TextIO) -> Style:
     if is_tty:
         try:
             columns = os.get_terminal_size(stream.fileno()).columns
-        except OSError, ValueError:
+        except (OSError, ValueError):
             columns = None  # a tty-like stream without a real terminal behind it
     return style_for(is_tty=is_tty, columns=columns, env=os.environ)

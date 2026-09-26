@@ -1,21 +1,26 @@
 """`Command`: the root builder, and the only place that touches the process."""
 
+from __future__ import annotations
+
 import dataclasses
 import os
 import sys
-from collections.abc import Iterable, Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from argbuilder._arg import Arg, ArgGroup, _check_bool
 from argbuilder._build import build
 from argbuilder._error import Error, ErrorKind
 from argbuilder._help import render_help, render_usage, render_version, usage_error
 from argbuilder._invariant import invariant
-from argbuilder._matches import ArgMatches
 from argbuilder._parser import parse
 from argbuilder._spec import CommandSpec
 from argbuilder._style import PLAIN, Style
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from argbuilder._matches import ArgMatches
 
 _NO_ENV: Mapping[str, str] = MappingProxyType({})
 
@@ -51,7 +56,7 @@ class Command:
         return self._spec.name
 
     def _with(self, **changes: Any) -> Command:
-        new = Command.__new__(Command)
+        new: Command = Command.__new__(Command)
         new._spec = dataclasses.replace(self._spec, **changes)
         return new
 
@@ -81,7 +86,8 @@ class Command:
 
     def arg(self, arg: Arg) -> Command:
         invariant(isinstance(arg, Arg), f"{self!r}.arg() takes an Arg, got {arg!r}")
-        return self._with(args=(*self._spec.args, arg._spec))
+        # Same-package handoff of an Arg's spec into the Command's spec tuple.
+        return self._with(args=(*self._spec.args, arg._spec))  # noqa: SLF001
 
     def args(self, args: Iterable[Arg]) -> Command:
         invariant(
@@ -98,7 +104,8 @@ class Command:
             isinstance(group, ArgGroup),
             f"{self!r}.group() takes an ArgGroup, got {group!r}",
         )
-        return self._with(groups=(*self._spec.groups, group._spec))
+        # Same-package handoff of an ArgGroup's spec into the Command's spec tuple.
+        return self._with(groups=(*self._spec.groups, group._spec))  # noqa: SLF001
 
     def subcommand(self, command: Command) -> Command:
         invariant(

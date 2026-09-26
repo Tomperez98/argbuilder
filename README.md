@@ -1,45 +1,54 @@
 # argbuilder
 
-Build command-line interfaces in Python from typed, immutable builders.
-A mistake in your CLI's definition fails the first time it's built, not in
-front of a user. A mistake on the command line comes back as a value you can
-inspect, and its error message, typo suggestion and help are ready to print.
-No dependencies.
+[![CI](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml/badge.svg)](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml)
+
+Build command-line interfaces in Python from typed, immutable builders — the
+[clap] model.
+
+A broken *definition* fails when the command is built, in CI, not in front of a
+user. A broken *command line* comes back as an `Error` you can inspect, with the
+message, typo suggestion and help ready to print.
+
+> **Python 3.12+** · no dependencies ·
+> [github.com/Tomperez98/argbuilder](https://github.com/Tomperez98/argbuilder)
 
 ```python
-from pathlib import Path
 from argbuilder import Arg, Command, ValueValidation
 
-cli = (
-    Command("git")
-    .about("A fictional versioning CLI")
-    .version("1.0.0")
-    .subcommand_required(True)
-    .arg(Arg("verbose").short("v").long("verbose").action("count"))
-    .subcommand(
-        Command("push")
-        .about("Pushes things")
-        .arg(Arg("remote").required(True))
-        .arg(
-            Arg("port")
-            .short("p")
-            .long("port")
-            .value_parser(range(1, 65536))
-            .env("GIT_PORT")
-            .default_value("22")
-        )
-        .arg(Arg("force").short("f").long("force").action("set_true"))
-    )
-)
 
-matches = cli.get_matches()  # reads sys.argv + os.environ, exits on error
-match matches.subcommand():
-    case ("push", sub):
-        remote = sub.get_required("remote", str)  # str: required(True), never None
-        port = sub.get_required("port", int)  # int: it has a default
-        force = sub.get_flag("force")  # bool
-        if remote.startswith("-"):
-            sub.error(ValueValidation(), "remote must not start with '-'").exit()
+def cli() -> Command:
+    return (
+        Command("git")
+        .about("A fictional versioning CLI")
+        .version("1.0.0")
+        .subcommand_required(True)
+        .arg(Arg("verbose").short("v").long("verbose").action("count"))
+        .subcommand(
+            Command("push")
+            .about("Pushes things")
+            .arg(Arg("remote").required(True))
+            .arg(
+                Arg("port")
+                .short("p")
+                .long("port")
+                .value_parser(range(1, 65536))
+                .env("GIT_PORT")
+                .default_value("22")
+            )
+            .arg(Arg("force").short("f").long("force").action("set_true"))
+        )
+    )
+
+
+if __name__ == "__main__":
+    matches = cli().get_matches()  # reads sys.argv + os.environ, exits on error
+    match matches.subcommand():
+        case ("push", sub):
+            remote = sub.get_required("remote", str)  # str: required(True), never None
+            port = sub.get_required("port", int)  # int: it has a default
+            force = sub.get_flag("force")  # bool
+            if remote.startswith("-"):
+                sub.error(ValueValidation(), "remote must not start with '-'").exit()
 ```
 
 ```text
@@ -51,7 +60,97 @@ Usage: git push [OPTIONS] <REMOTE>
 For more information, try '--help'.
 ```
 
-For a complete CLI, see [`examples/git.py`](examples/git.py) (`uv run examples/git.py --help`).
+A fuller CLI is in [`examples/git.py`](examples/git.py)
+(`uv run examples/git.py --help`).
+
+## Or derive it from classes
+
+Like clap's `#[derive(Parser)]`: fields describe the arguments, their types
+pick the action, and parsing returns an instance. The derive only builds a
+`Command`, so help, errors and the rules above are the same.
+
+```python
+from __future__ import annotations  # lets Git name Clone before it's defined
+
+from pathlib import Path
+
+from argbuilder import Parser, arg
+
+
+class Git(Parser, version="1.0.0"):
+    """A fictional versioning CLI."""  # the docstring's first paragraph is `about`
+
+    verbose: int = arg(short=True, long=True, action="count", global_=True)
+    command: Clone | Push  # add `| None = None` to make it optional
+
+
+class Clone(Parser):
+    """Clones repos."""
+
+    remote: str
+    dir: Path | None = None
+
+
+class Push(Parser):
+    """Pushes things."""
+
+    port: int = arg(short=True, long=True, value_parser=range(1, 65536), default=22)
+    force: bool = arg(short=True, long=True)
+
+
+git = Git.parse()  # or Git.try_parse_from(argv, env) -> Git | Error
+match git.command:
+    case Push(port=port, force=force):
+        ...
+    case Clone(remote=remote):
+        ...
+```
+
+| Field | Becomes |
+|---|---|
+| `x: T` | required; `T` picks the value parser (`int`, `Path`, a `Literal` alias, any `str -> T` callable) |
+| `x: T = 22` or `arg(default=22)` | `default_value("22")`, checked to parse back to `22` |
+| `x: T \| None` | optional, `None` when absent |
+| `x: tuple[T, ...]` | `append`: every value, `()` when absent; `arg(required=True)` for at least one |
+| `x: bool` | `set_true` flag; `arg(action="set_false")` for the opposite |
+| `x: int = arg(action="count")` | `count` flag |
+| `x: A \| B` (`Parser` classes) | the subcommand, named in kebab-case (`RemoteAdd` → `remote-add`) |
+| `x: Shared` (an `Args` class) | its fields, flattened in (clap's `#[command(flatten)]`) |
+
+Without `short` or `long` a field is positional. `short=True` / `long=True`
+/ `env=True` derive `-d` / `--dry-run` / `DRY_RUN` from the field name.
+Command options go on the class: `name`, `about`, `version`, `aliases`,
+`visible_aliases`, `arg_required_else_help`, `disable_help_flag`,
+`disable_version_flag`, `disable_help_subcommand`.
+
+Subclasses are frozen, keyword-only dataclasses (don't add `@dataclass`),
+and type checkers see them that way. Definition bugs still panic: class
+options at the `class` statement, fields at the first `to_command()` or
+parse, since annotations may name classes defined further down. Test them
+with `Git.to_command().debug_assert()`.
+
+For anything the derive doesn't cover, extend the builder and read the
+result back: `Git.from_arg_matches(Git.to_command().arg(...).get_matches())`.
+The same CLI as [`examples/git.py`](examples/git.py), derived, is in
+[`examples/git_derive.py`](examples/git_derive.py).
+
+Argument types are read at runtime, so keep their imports out of
+`if TYPE_CHECKING:`. With ruff's `TC` rules, add:
+
+```toml
+[lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["argbuilder.Parser", "argbuilder.Args"]
+```
+
+## Install
+
+Not on PyPI yet; install from source:
+
+```bash
+uv add git+https://github.com/Tomperez98/argbuilder
+# or
+pip install "argbuilder @ git+https://github.com/Tomperez98/argbuilder"
+```
 
 ## The contract: bugs panic, user mistakes return values
 
@@ -61,6 +160,18 @@ For a complete CLI, see [`examples/git.py`](examples/git.py) (`uv run examples/g
 | **You**, reading matches | unknown id, `get_one("port", str)` on an int, `get_one` on an `Append` arg, `get_flag` on a value arg, `get_required` on an arg that can be absent | `AssertionError` at the call |
 | **The user**, typing the command | unknown flag, bad value, missing required arg, `--help` | `try_get_matches_from` **returns** an `Error`. `get_matches` prints it and exits (0 for help/version, 2 otherwise). |
 
+That second row is why matches are read with typed getters, not a dictionary:
+
+| Getter | Use it for |
+|---|---|
+| `get_required(id, T)` | an arg that is `required(True)` or has a default — never `None` |
+| `get_one(id, T)` | an optional value, as `T \| None` |
+| `get_many(id, T)` | `append` and multi-value args: a `tuple`, empty when absent |
+| `get_flag(id)` | a `set_true` / `set_false` flag, as `bool` |
+| `get_count(id)` | a `count` flag, as `int` |
+| `contains_id(id)` | whether a value is present from any source, defaults included |
+| `value_source(id)` | `"default_value"`, `"env_variable"` or `"command_line"` |
+
 Catch definition bugs in CI the way clap recommends:
 
 ```python
@@ -68,12 +179,16 @@ def test_cli() -> None:
     cli().debug_assert()
 ```
 
-Test parsing with no process involved. The parser is pure, and the
-environment is a parameter that defaults to empty:
+Test parsing with no process involved. The parser is pure, and the environment
+is a parameter that defaults to empty:
 
 ```python
+from argbuilder import ArgMatches
+
 result = cli().try_get_matches_from(["git", "push", "origin"], env={"GIT_PORT": "8080"})
-assert isinstance(result, ArgMatches) and result.get_one("port", int) == 8080
+assert isinstance(result, ArgMatches)
+sub = result.subcommand_matches("push")
+assert sub is not None and sub.get_required("port", int) == 8080
 ```
 
 Only `get_matches()` reads `sys.argv` and `os.environ` for parsing. Printing
@@ -120,7 +235,7 @@ Coming from [clap]? The builder API maps almost one to one:
 | `Error::exit`, `ErrorKind`, `Command::error` | `Error.exit()`, `ErrorKind`, `Command.error()`, and `ArgMatches.error()` for the subcommand you're in |
 | `Arg::global(true)` | `.global_(True)` (`global` is a Python keyword). See below for how repeats work. |
 | `alias`, `visible_alias`, `short_alias`, `visible_short_alias` | The same names, on `Arg` and (`alias` / `visible_alias`) on `Command`. Call once per alias. |
-| the `help` subcommand, `disable_help_subcommand` | The same: `git help`, `git help push`, `git help remote add` |
+| the `help` subcommand, `disable_help_subcommand` | The same: `git help`, `git help push` |
 
 `ArgAction` and `ValueSource` are `Literal` strings, so a type checker
 catches a typo like `.action("cout")`, and at runtime it panics with a
@@ -140,10 +255,9 @@ match result.kind:
 Also supported: `env`, `default_value(s)`, `default_missing_value`,
 `conflicts_with(_all)`, `requires`, `ArgGroup` (`required`, `multiple`),
 `allow_hyphen_values`, `value_delimiter`, `hide`, `arg_required_else_help`,
-`disable_help_flag` / `disable_version_flag`, `value_source`, typo
-suggestions for arguments, subcommands and values, and a tip when an option
-is used at the wrong level (`git push -V`: "'-V' is an option of 'git'; put
-it before 'push'").
+`disable_help_flag` / `disable_version_flag`, typo suggestions for arguments,
+subcommands and values, and a tip when an option is used at the wrong level
+(`git push -V`: "'-V' is an option of 'git'; put it before 'push'").
 
 A global option is read the same way at every level (`matches.get_count("verbose")`
 and `sub.get_count("verbose")` agree), and the whole command line counts as
@@ -154,5 +268,19 @@ can't be positional or required, and their `conflicts_with` / `requires` may
 only name other globals, because every subcommand has to be able to check them.
 
 Not implemented yet: `last` / trailing var-args.
+
+## Development
+
+CI runs the same checks on Python 3.12–3.14
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+
+```bash
+uv run pytest      # tests
+uv run ruff check  # lint
+uv run ty check    # type check
+```
+
+Releases publish to PyPI from CI when a `v*` tag is pushed
+([`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
 [clap]: https://docs.rs/clap/latest/clap/_tutorial/index.html

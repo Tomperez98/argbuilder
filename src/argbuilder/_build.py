@@ -5,14 +5,18 @@ no `None`-means-default fields, no re-validation. Every check here is a
 definition bug, so each one panics.
 """
 
-from collections.abc import Mapping, Sequence
+from __future__ import annotations
+
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from argbuilder._invariant import bug, invariant
 from argbuilder._spec import ArgAction, ArgSpec, CommandSpec, takes_values
 from argbuilder._value_parser import Invalid, ValueParser
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 MAX_COMMAND_DEPTH = 32
 """Subcommand nesting bound. A deeper tree is a construction bug, not a real CLI."""
@@ -393,13 +397,11 @@ def _check_positionals(positionals: Sequence[ResolvedArg], where: str) -> None:
 
 def _claim(
     table: dict[str, ResolvedArg],
-    key: str | None,
+    key: str,
     dashes: str,
     arg: ResolvedArg,
     where: str,
 ) -> None:
-    if key is None:
-        return
     taken = table.get(key)
     if taken is arg:
         bug(f"{where}: argument {arg.id!r} lists '{dashes}{key}' more than once")

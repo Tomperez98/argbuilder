@@ -1,13 +1,19 @@
 """Pure rendering of help, usage, version and argument names, in clap's layout."""
 
-import textwrap
-from collections.abc import Sequence
+from __future__ import annotations
 
-from argbuilder._build import ResolvedArg, ResolvedCommand
+import textwrap
+from typing import TYPE_CHECKING
+
 from argbuilder._error import Error, ErrorKind
 from argbuilder._invariant import invariant
 from argbuilder._spec import takes_values
 from argbuilder._style import PLAIN, Style
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from argbuilder._build import ResolvedArg, ResolvedCommand
 
 MIN_HELP_COLUMN = 20
 """Help text narrower than this moves below its flag instead of beside it."""

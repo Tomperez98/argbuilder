@@ -1,5 +1,7 @@
 """A git-like CLI. Try: uv run examples/git.py --help, help clone, push -v --port 0, stage x."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Literal
 
@@ -78,11 +80,11 @@ def run(matches: ArgMatches) -> str | Error:
         case ("add", sub):
             return "adding " + ", ".join(str(path) for path in sub.get_many("paths", Path))
         case other:
-            raise AssertionError(f"subcommand_required(True) guarantees a match, got {other!r}")
+            msg = f"subcommand_required(True) guarantees a match, got {other!r}"
+            raise AssertionError(msg)
 
 
 if __name__ == "__main__":
     result = run(cli().get_matches())
     if isinstance(result, Error):
         result.exit()
-    print(result)

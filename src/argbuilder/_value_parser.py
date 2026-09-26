@@ -1,5 +1,7 @@
 """Value parsers: raw command-line string -> typed value, or `Invalid`."""
 
+from __future__ import annotations
+
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAliasType, get_args, get_origin

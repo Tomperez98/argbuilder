@@ -1,11 +1,15 @@
 """Immutable definitions the fluent builders produce. Plain data, no behavior."""
 
+from __future__ import annotations
+
 import difflib
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from argbuilder._invariant import bug
-from argbuilder._value_parser import ValueParser
+
+if TYPE_CHECKING:
+    from argbuilder._value_parser import ValueParser
 
 type ArgAction = Literal["set", "append", "set_true", "set_false", "count", "help", "version"]
 """What happens when an argument is encountered. Mirrors clap's `ArgAction`.
@@ -31,7 +35,7 @@ def check_action(owner: str, value: object) -> ArgAction:
 
 
 def takes_values(action: ArgAction) -> bool:
-    return action == "set" or action == "append"
+    return action in {"set", "append"}
 
 
 @dataclass(frozen=True, slots=True)

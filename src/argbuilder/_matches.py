@@ -1,14 +1,19 @@
 """`ArgMatches`: typed, read-only access to what was parsed."""
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Literal
+from __future__ import annotations
 
-from argbuilder._build import ResolvedArg, ResolvedCommand
-from argbuilder._error import Error, ErrorKind
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
+
 from argbuilder._help import usage_error
 from argbuilder._invariant import bug, invariant
 from argbuilder._spec import takes_values
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from argbuilder._build import ResolvedArg, ResolvedCommand
+    from argbuilder._error import Error, ErrorKind
 
 type ValueSource = Literal["default_value", "env_variable", "command_line"]
 """Where an argument's value came from, in increasing precedence.

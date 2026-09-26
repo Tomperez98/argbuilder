@@ -1,5 +1,7 @@
 """Help, version and error rendering, plus the process edge."""
 
+from __future__ import annotations
+
 import pytest
 
 from argbuilder import (
@@ -189,3 +191,26 @@ def test_get_matches_reads_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.argv", ["tool", "in"])
     monkeypatch.setenv("TOKEN", "abc")
     assert CMD.get_matches().get_one("token", str) == "abc"
+
+
+def test_render_usage() -> None:
+    assert CMD.render_usage() == "Usage: tool [OPTIONS] <INPUT> [EXTRA]..."
+
+
+def test_missing_subcommand_error_lists_subcommands() -> None:
+    cli = Command("git").subcommand(Command("add")).subcommand_required(True)
+    result = cli.try_get_matches_from(["git"])
+    assert isinstance(result, Error)
+    assert result.render() == (
+        "error: 'git' requires a subcommand but one was not provided\n"
+        "  [subcommands: add, help]\n"
+        "\n"
+        "Usage: git [OPTIONS] <COMMAND>\n"
+        "\n"
+        "For more information, try '--help'.\n"
+    )
+
+
+def test_error_without_a_usage_or_help_hint() -> None:
+    error = Error(ValueValidation(), "something went wrong")
+    assert error.render() == "error: something went wrong\n"

@@ -4,12 +4,12 @@ No IO, no globals: the environment arrives as a mapping, and output is
 produced only by the caller at the edge (`Error.exit()`).
 """
 
+from __future__ import annotations
+
 import difflib
 import functools
-from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from argbuilder._build import ResolvedArg, ResolvedCommand
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -32,6 +32,11 @@ from argbuilder._invariant import bug, invariant
 from argbuilder._matches import ArgMatches, MatchedArg
 from argbuilder._spec import takes_values
 from argbuilder._value_parser import Invalid, parse_boolish
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, Sequence
+
+    from argbuilder._build import ResolvedArg, ResolvedCommand
 
 
 def parse(
@@ -86,7 +91,10 @@ class _Parser:
             elif token in cmd.subcommand_names:
                 name = cmd.subcommand_names[token]
                 child = _Parser(
-                    cmd.subcommands[name], self._env, (*self._ancestors, cmd), self._globals
+                    cmd.subcommands[name],
+                    self._env,
+                    (*self._ancestors, cmd),
+                    self._globals,
                 )
                 sub = child.run(tokens[index + 1 :])
                 if isinstance(sub, Error):
@@ -153,7 +161,8 @@ class _Parser:
             if self._cmd.subcommands:
                 closest = _closest(token, _visible_subcommand_names(self._cmd))
                 return self._error(
-                    InvalidSubcommand(token, closest), tip=_similar_tip("subcommand", closest)
+                    InvalidSubcommand(token, closest),
+                    tip=_similar_tip("subcommand", closest),
                 )
             return self._error(UnknownArgument(token))
         values = self._parse_values(arg, [token], env=None)
@@ -182,6 +191,8 @@ class _Parser:
 
     def _flag(self, arg: ResolvedArg, next_index: int) -> int | Error:
         match arg.action:
+            case "set" | "append":
+                bug(f"_flag() called for value-taking argument {arg.id!r}")
             case "help":
                 return _help_error(DisplayHelp(), self._cmd)
             case "version":
@@ -190,13 +201,11 @@ class _Parser:
                 store = self._store(arg)
                 (count,) = store.get(arg.id, [0])
                 store[arg.id] = [count + 1]
-            case "set_true" | "set_false":
+            case "set_true" | "set_false":  # pragma: no branch
                 store = self._store(arg)
                 if arg.id in store:
                     return self._repeated(arg)
                 store[arg.id] = [arg.action == "set_true"]
-            case "set" | "append":
-                bug(f"_flag() called for value-taking argument {arg.id!r}")
         return next_index
 
     def _take_values(
@@ -306,10 +315,9 @@ class _Parser:
             if not group.multiple and len(present) > 1:
                 return self._conflict(present[0], present[1])
 
-        missing: list[str] = []
-        for arg in cmd.args:
-            if arg.required and arg.id not in explicit:
-                missing.append(display_arg(arg))
+        missing: list[str] = [
+            display_arg(arg) for arg in cmd.args if arg.required and arg.id not in explicit
+        ]
         for group in cmd.groups:
             if group.required and not any(member in explicit for member in group.members):
                 members = "|".join(display_arg(cmd.by_id[member]) for member in group.members)
@@ -416,10 +424,7 @@ def _descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
 
 
 def _owns(cmd: ResolvedCommand, flag: str) -> bool:
-    if flag.startswith("--"):
-        arg = cmd.by_long.get(flag[2:])
-    else:
-        arg = cmd.by_short.get(flag[1:])
+    arg = cmd.by_long.get(flag[2:]) if flag.startswith("--") else cmd.by_short.get(flag[1:])
     # An inherited global belongs to the ancestor that defined it, which is listed already.
     return arg is not None and not arg.hide and arg.id not in cmd.inherited
 

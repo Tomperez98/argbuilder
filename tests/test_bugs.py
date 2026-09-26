@@ -1,7 +1,8 @@
 """Bugs panic: every definition or access mistake raises AssertionError at once."""
 
-from collections.abc import Callable
-from typing import Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -15,6 +16,11 @@ from argbuilder import (
     ValueParser,
     ValueValidation,
 )
+from argbuilder._invariant import variant_classes
+from argbuilder._value_parser import into_value_parser
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def panics(match: str) -> pytest.RaisesExc[AssertionError]:
@@ -32,6 +38,7 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: Arg("x").num_args(0), "max must be >= min and >= 1"),
     (lambda: Arg("x").num_args(3, 2), "max must be >= min"),
     (lambda: Arg("x").num_args(-1, None), "min must be an int >= 0"),
+    (lambda: Arg("x").num_args(1, "2"), "max must be an int or None"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").value_parser("abc"), "a str is ambiguous"),
     (lambda: Arg("x").value_parser(42), "expected a ValueParser"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").value_parser([]), "at least one"),
@@ -59,6 +66,45 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
 def test_builder_bug(make: Callable[[], object], message: str) -> None:
     with panics(message):
         make()
+
+
+def test_arg_get_id() -> None:
+    assert Arg("port").get_id() == "port"
+
+
+type _NotAClasses = int | Literal["x"]
+
+type _Alias00 = int
+type _Alias01 = _Alias00
+type _Alias02 = _Alias01
+type _Alias03 = _Alias02
+type _Alias04 = _Alias03
+type _Alias05 = _Alias04
+type _Alias06 = _Alias05
+type _Alias07 = _Alias06
+type _Alias08 = _Alias07
+type _Alias09 = _Alias08
+type _Alias10 = _Alias09
+type _Alias11 = _Alias10
+type _Alias12 = _Alias11
+type _Alias13 = _Alias12
+type _Alias14 = _Alias13
+type _Alias15 = _Alias14
+type _Alias16 = _Alias15
+type _Alias17 = _Alias16
+type _Alias18 = _Alias17
+type _Alias19 = _Alias18
+type _Alias20 = _Alias19
+
+
+def test_variant_classes_rejects_a_non_class_member() -> None:
+    with panics("must be a union of classes"):
+        variant_classes(_NotAClasses)
+
+
+def test_recursive_alias_chain_panics() -> None:
+    with panics("type alias chain is deeper than 16"):
+        into_value_parser(_Alias20)
 
 
 # -- when the command is built --------------------------------------------------
@@ -121,9 +167,18 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         Command("x").subcommand(Command("sub").arg(Arg("a")).arg(Arg("a"))),
         "Command 'x sub': argument id 'a'",
     ),
-    (Command("x").arg(Arg("f").global_(True)), r"global_\(\) needs short\(\) or long\(\)"),
-    (Command("x").arg(Arg("f").long("f").required(True).global_(True)), "cannot be required"),
-    (Command("x").arg(Arg("h").long("hh").action("help").global_(True)), "cannot be global"),
+    (
+        Command("x").arg(Arg("f").global_(True)),
+        r"global_\(\) needs short\(\) or long\(\)",
+    ),
+    (
+        Command("x").arg(Arg("f").long("f").required(True).global_(True)),
+        "cannot be required",
+    ),
+    (
+        Command("x").arg(Arg("h").long("hh").action("help").global_(True)),
+        "cannot be global",
+    ),
     (
         Command("x")
         .arg(Arg("v").short("v").action("count").global_(True))
