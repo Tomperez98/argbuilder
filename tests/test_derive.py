@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import pytest
 
@@ -400,6 +400,33 @@ def test_configured_fields_build() -> None:
     assert isinstance(colored, Configured) and colored.color == "always"
 
 
+class Wired(Parser):
+    """Every arg() option the other fixtures do not name."""
+
+    hidden: str | None = arg(long=True, hide=True)
+    hyphen: str | None = arg(long=True, allow_hyphen_values=True)
+    named: str | None = arg(long=True, value_name="THING", aliases=["n"])
+    toggle: bool = arg(long=True, conflicts_with=["hyphen"])
+    needs: str | None = arg(long=True, requires="hyphen")
+    rest: tuple[str, ...] = arg(last=True)
+
+
+def test_configured_fields_wire_every_builder_option() -> None:
+    # Each option must survive `arg()` -> `_ArgOptions` -> the builder chain,
+    # and `hide`, `aliases`, `conflicts_with`, `requires`, `allow_hyphen_values`
+    # and `last` must reach parse behavior, not just the metadata.
+    cmd = Wired.to_command()
+    cmd.debug_assert()
+    help_text = cmd.render_help()
+    assert "--hidden" not in help_text
+    assert "--named <THING>" in help_text
+    parsed = parse(Wired, "--n", "v", "--", "a", "b")
+    assert (parsed.named, parsed.rest) == ("v", ("a", "b"))
+    assert parse(Wired, "--hyphen", "-5").hyphen == "-5"
+    assert isinstance(fail(Wired, "--hyphen", "x", "--toggle").kind, ArgumentConflict)
+    assert isinstance(fail(Wired, "--needs", "y").kind, MissingRequiredArgument)
+
+
 def test_parse_from_exits_on_error() -> None:
     with pytest.raises(SystemExit) as exited:
         Git.parse_from(["git"])
@@ -425,3 +452,44 @@ def test_check_type_without_an_explicit_parser_panics() -> None:
     with panics("unsupported field type"):
         _check_type("Bad.x", dict[str, int], explicit=False)
     assert _check_type("Bad.x", dict[str, int], explicit=True) is object
+
+
+class TypingOptional(Parser):
+    # `typing.Optional` / `typing.Union` resolve to `typing.Union` at runtime,
+    # while `X | None` resolves to `types.UnionType`: two distinct code paths,
+    # both of which must produce an optional field.
+    count: Optional[int] = arg(long=True)  # noqa: UP045
+    label: Union[str, None] = arg(long=True)  # noqa: UP007
+
+
+class HTTPServer(Parser):
+    pass
+
+
+class MultiSentence(Parser):
+    """Does one thing. And then another."""
+
+
+def test_typing_optional_and_union_are_optional_fields() -> None:
+    assert parse(TypingOptional) == TypingOptional(count=None, label=None)
+    parsed = parse(TypingOptional, "--count", "3", "--label", "x")
+    assert (parsed.count, parsed.label) == (3, "x")
+
+
+def test_kebab_case_handles_acronyms() -> None:
+    assert HTTPServer.to_command().get_name() == "http-server"
+
+
+def test_about_keeps_the_period_of_a_multi_sentence_docstring() -> None:
+    # A lone trailing period is dropped, but a docstring with a sentence break
+    # keeps it (`_about` must not truncate the second sentence).
+    assert (
+        MultiSentence.to_command().render_help().startswith("Does one thing. And then another.\n")
+    )
+
+
+def test_parser_base_methods_panic() -> None:
+    with panics("call it on a subclass"):
+        Parser.to_command()
+    with panics("call it on a subclass"):
+        Parser.from_arg_matches(None)  # ty: ignore[invalid-argument-type]

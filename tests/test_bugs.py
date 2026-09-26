@@ -15,6 +15,8 @@ from argbuilder import (
     DisplayVersion,
     Error,
     InvalidValue,
+    TooManyValues,
+    UnknownArgument,
     ValueParser,
     ValueValidation,
     arg,
@@ -50,6 +52,11 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: ArgGroup("g").args(["a", "a"]), "duplicate members"),
     (lambda: Arg("x").default_values(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").default_values("22"), "takes an iterable"),
+    (lambda: Arg("x").default_values([]), "non-empty list of str"),
+    (lambda: Arg("x").default_values(["ok", 1]), "non-empty list of str"),  # ty: ignore[invalid-argument-type]
+    (lambda: Arg("x").env("A=B"), "takes a variable name"),
+    (lambda: Arg("x").env(""), "takes a variable name"),
+    (lambda: Arg("x").env(1), "takes a variable name"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").conflicts_with_all(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
     (lambda: ArgGroup("g").args(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
     (lambda: arg(requires=42), "takes a str or a list of str"),  # ty: ignore[invalid-argument-type]
@@ -111,6 +118,16 @@ type _Alias20 = _Alias19
 def test_variant_classes_rejects_a_non_class_member() -> None:
     with panics("must be a union of classes"):
         variant_classes(_NotAClasses)
+
+
+type _Nested = InvalidValue | UnknownArgument
+type _Outer = _Nested | TooManyValues
+
+
+def test_variant_classes_flattens_a_nested_alias() -> None:
+    # `A | (B | C)` must expand in order. A queue mutation that drops or
+    # reorders a member silently shrinks the union `ErrorKind` validates.
+    assert variant_classes(_Outer) == (InvalidValue, UnknownArgument, TooManyValues)
 
 
 def test_recursive_alias_chain_panics() -> None:
@@ -266,8 +283,52 @@ def test_depth_is_bounded() -> None:
         cmd.debug_assert()
 
 
+def test_the_depth_limit_admits_exactly_32_levels() -> None:
+    # `depth < MAX_COMMAND_DEPTH` permits depths 0..=31, i.e. 32 levels; the
+    # 33rd panics. A `<` -> `<=` mutant would let the tree grow one level too
+    # deep, which only a boundary test notices.
+    allowed = Command("leaf")
+    for level in range(31):
+        allowed = Command(f"l{level}").subcommand(allowed)
+    allowed.debug_assert()
+    too_deep = Command("leaf")
+    for level in range(32):
+        too_deep = Command(f"l{level}").subcommand(too_deep)
+    with panics("nest deeper than 32"):
+        too_deep.debug_assert()
+
+
+def test_subcommand_required_accepts_a_single_subcommand() -> None:
+    # The guard only needs one subcommand; a `len(...) > 1` mutant would
+    # reject the common one-subcommand CLI at build time.
+    Command("x").subcommand(Command("only")).subcommand_required(True).debug_assert()
+
+
+def test_append_defaults_may_exceed_num_args_but_set_defaults_may_not() -> None:
+    # An `append` argument accumulates, so more defaults than one occurrence
+    # can hold are legal; a `set` argument cannot.
+    Command("x").arg(
+        Arg("tag").long("tag").action("append").num_args(1).default_values(["a", "b"])
+    ).debug_assert()
+    with panics("default values"):
+        Command("x").arg(
+            Arg("name").long("name").num_args(1).default_values(["a", "b"])
+        ).debug_assert()
+
+
 def test_freeing_the_help_short() -> None:
     Command("x").disable_help_flag(True).arg(Arg("host").short("h")).debug_assert()
+
+
+def test_disable_version_flag_removes_the_automatic_flag() -> None:
+    # The setter must actually reach the resolved command: neither the flag
+    # nor its help line may survive.
+    cmd = Command("x").version("1.0").disable_version_flag(True)
+    cmd.debug_assert()
+    assert "--version" not in cmd.render_help()
+    result = cmd.try_get_matches_from(["x", "--version"])
+    assert isinstance(result, Error)
+    assert isinstance(result.kind, UnknownArgument)
 
 
 def test_a_custom_help_action_replaces_the_automatic_flag() -> None:
@@ -352,6 +413,20 @@ ACCESS_BUGS: list[tuple[Callable[[ArgMatches], object], str]] = [
 def test_access_bug(read: Callable[[ArgMatches], object], message: str) -> None:
     with panics(message):
         read(matches())
+
+
+def test_value_getter_panic_names_the_getter() -> None:
+    # The panic names which getter was misused; dropping that argument is a
+    # behavioral change a message-only assertion would miss.
+    with panics(r"get_one\('force'\): argument uses action 'set_true'"):
+        matches().get_one("force", bool)
+    with panics(r"get_many\('v'\): argument uses action 'count'"):
+        matches().get_many("v", int)
+
+
+def test_render_version_without_a_version_panics() -> None:
+    with panics("has no version to render"):
+        Command("x").render_version()
 
 
 def test_a_bool_value_is_not_read_as_an_int() -> None:

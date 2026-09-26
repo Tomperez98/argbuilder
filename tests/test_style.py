@@ -107,7 +107,10 @@ def test_exit_styles_for_the_stream(
         (True, 80, {"COLUMNS": "wide"}, Style(color=True, width=80)),
         (True, 300, {}, Style(color=True, width=MAX_WIDTH)),
         (True, 5, {}, Style(color=True, width=MIN_WIDTH)),
+        (True, 1, {}, Style(color=True, width=MIN_WIDTH)),
         (True, 0, {}, Style(color=True, width=MAX_WIDTH)),
+        (True, None, {"COLUMNS": "1"}, Style(color=True, width=MIN_WIDTH)),
+        (True, None, {"COLUMNS": "0"}, Style(color=True, width=MAX_WIDTH)),
     ],
 )
 def test_style_for(is_tty: bool, columns: int | None, env: dict[str, str], expected: Style) -> None:

@@ -22,6 +22,11 @@ description = "Run the test suite"
 depends = ["sync"]
 run = "uv run --no-sync pytest -q"
 
+[tasks.mutation]
+description = "Mutation-test the package (mutmut; local, informational)"
+depends = ["sync"]
+run = "uv run --no-sync mutmut run --max-children 4 && uv run --no-sync mutmut export-cicd-stats"
+
 [tasks.build]
 description = "Build the sdist and wheel (publishes nothing)"
 depends = ["sync"]
