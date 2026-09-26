@@ -11,3 +11,6 @@ wheels/
 .venv.nosync
 
 .coverage
+
+# Smoke-test venv created by `mise run smoke`
+.smoke/

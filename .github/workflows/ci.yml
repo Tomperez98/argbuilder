@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,6 +14,26 @@ permissions:
   contents: read
 
 jobs:
+  # Version-independent checks, run once: rot fast, and keep the slow test
+  # matrix from repeating them per interpreter.
+  checks:
+    name: Lint, type, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17" # keep in sync with mise.toml [tools]
+          enable-cache: true
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: "false" # uv comes from setup-uv, above
+      - name: Lint, format, type-check
+        run: mise run ci:fast
+      - name: Build and smoke-test the wheel (publishes nothing)
+        run: mise run smoke
+
   test:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -28,14 +49,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
+          version: "0.12.17" # keep in sync with mise.toml [tools]
           enable-cache: true
-      - name: Install
-        run: uv sync --locked
-      - name: Lint
-        run: uv run ruff check
-      - name: Type check
-        run: uv run ty check
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: "false"
       - name: Test
-        run: uv run pytest -q
-      - name: Build (dry run, publishes nothing)
-        run: uv build
+        run: mise run test
