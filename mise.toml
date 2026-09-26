@@ -25,7 +25,7 @@ run = "uv run --no-sync pytest -q"
 [tasks.build]
 description = "Build the sdist and wheel (publishes nothing)"
 depends = ["sync"]
-run = "uv build"
+run = "uv build --clear"
 
 [tasks.smoke]
 description = "Install the built wheel into a clean venv and import it"
