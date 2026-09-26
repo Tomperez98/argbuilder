@@ -24,7 +24,7 @@ MAX_COMMAND_DEPTH = 32
 
 _STRING: ValueParser[str] = ValueParser(lambda raw: raw)
 _FLAG_DEFAULTS: Mapping[ArgAction, tuple[Any, ...]] = MappingProxyType(
-    {"set_true": (False,), "set_false": (True,), "count": (0,)}
+    {"set_true": (False,), "set_false": (True,), "count": (0,)},
 )
 _HELP_SPEC = ArgSpec(id="help", short="h", long="help", help="Print help", action="help")
 _VERSION_SPEC = ArgSpec(
@@ -484,7 +484,7 @@ def _claim(
             inherited = f"; {owner!r} is global, so it is already defined in every subcommand"
         bug(
             f"{where}: '{dashes}{key}' is used by both {taken.id!r} and {arg.id!r}"
-            f"{_AUTO_FLAG_HINT if auto else inherited}"
+            f"{_AUTO_FLAG_HINT if auto else inherited}",
         )
     table[key] = arg
 

@@ -31,7 +31,7 @@ CMD = (
         .long("level")
         .value_parser(["low", "high"])
         .default_value("low")
-        .help("How hard to try")
+        .help("How hard to try"),
     )
     .arg(Arg("quiet").short("q").action("set_true"))
 )
@@ -86,7 +86,8 @@ def test_help_errors_restyle(argv: list[str], kind: ErrorKind) -> None:
 
 
 def test_exit_styles_for_the_stream(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("COLUMNS", raising=False)
     with pytest.raises(SystemExit):

@@ -194,7 +194,8 @@ def test_to_command_is_cached() -> None:
 
 @pytest.mark.parametrize("sub", [[], ["clone"], ["push"], ["add"]])
 def test_derived_example_matches_the_builder_example(
-    sub: list[str], example: Callable[[str], ModuleType]
+    sub: list[str],
+    example: Callable[[str], ModuleType],
 ) -> None:
     built: Command = example("git").cli()
     derived: Command = example("git_derive").Git.to_command()

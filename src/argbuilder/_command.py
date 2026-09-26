@@ -157,7 +157,7 @@ class Command:
     def arg_required_else_help(self, yes: bool) -> Command:
         """With no arguments at all, print help to stderr and exit 2."""
         return self._with(
-            arg_required_else_help=_check_bool(repr(self), "arg_required_else_help", yes)
+            arg_required_else_help=_check_bool(repr(self), "arg_required_else_help", yes),
         )
 
     def disable_help_flag(self, yes: bool) -> Command:
@@ -169,7 +169,7 @@ class Command:
     def disable_help_subcommand(self, yes: bool) -> Command:
         """Don't add the `help [COMMAND]...` subcommand a command with subcommands gets."""
         return self._with(
-            disable_help_subcommand=_check_bool(repr(self), "disable_help_subcommand", yes)
+            disable_help_subcommand=_check_bool(repr(self), "disable_help_subcommand", yes),
         )
 
     # -- use ----------------------------------------------------------------
@@ -182,7 +182,9 @@ class Command:
         self._resolved()
 
     def try_get_matches_from(
-        self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV
+        self,
+        argv: Iterable[str],
+        env: Mapping[str, str] = _NO_ENV,
     ) -> ArgMatches | Error:
         """Parse `argv` (first element is the binary name, like `sys.argv`).
 

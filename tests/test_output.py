@@ -52,7 +52,7 @@ GIT = (
         .about("Adds things")
         .visible_alias("stage")
         .alias("a")
-        .arg(Arg("force").short("f").visible_short_alias("F").action("set_true"))
+        .arg(Arg("force").short("f").visible_short_alias("F").action("set_true")),
     )
     .subcommand(Command("rm").alias("remove"))
 )

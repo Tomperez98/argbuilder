@@ -36,12 +36,12 @@ def rich_command() -> Command:
             .long("level")
             .value_parser(["low", "high"])
             .default_value("low")
-            .help("How hard to try")
+            .help("How hard to try"),
         )
         .arg(Arg("verbose").short("v").action("count").help("Be loud"))
         .arg(Arg("secret").long("secret").hide(True))
         .subcommand(
-            Command("run").about("Runs it").arg(Arg("target").required(True).help("What to run"))
+            Command("run").about("Runs it").arg(Arg("target").required(True).help("What to run")),
         )
         .subcommand(Command("clean").about("Cleans up").visible_alias("rm").alias("wipe"))
     )
@@ -67,7 +67,9 @@ BUILDERS: list[tuple[str, Callable[[], Command]]] = [
 @pytest.mark.parametrize("width", WIDTHS)
 @pytest.mark.parametrize(("name", "build"), BUILDERS, ids=[name for name, _ in BUILDERS])
 def test_wrapping_only_changes_whitespace(
-    name: str, build: Callable[[], Command], width: int
+    name: str,
+    build: Callable[[], Command],
+    width: int,
 ) -> None:
     # The token sequence is the content; wrapping may only move tokens
     # between lines, never lose, duplicate, or reorder them.
@@ -87,7 +89,9 @@ def test_color_only_adds_escape_codes(name: str, build: Callable[[], Command], w
 @pytest.mark.parametrize("width", WIDTHS)
 @pytest.mark.parametrize(("name", "build"), BUILDERS, ids=[name for name, _ in BUILDERS])
 def test_help_has_no_trailing_whitespace_and_one_final_newline(
-    name: str, build: Callable[[], Command], width: int
+    name: str,
+    build: Callable[[], Command],
+    width: int,
 ) -> None:
     rendered = build().render_help(Style(width=width))
     assert rendered.endswith("\n")
@@ -107,13 +111,14 @@ def test_every_line_except_usage_fits_the_width(width: int) -> None:
 def test_help_is_pure() -> None:
     assert rich_command().render_help() == rich_command().render_help()
     assert rich_command().render_help(Style(width=50)) == rich_command().render_help(
-        Style(width=50)
+        Style(width=50),
     )
 
 
 @pytest.mark.parametrize(("name", "build"), BUILDERS, ids=[name for name, _ in BUILDERS])
 def test_markdown_has_no_trailing_whitespace_and_one_final_newline(
-    name: str, build: Callable[[], Command]
+    name: str,
+    build: Callable[[], Command],
 ) -> None:
     rendered = build().render_markdown()
     assert rendered.endswith("\n")
@@ -164,7 +169,9 @@ def test_visible_aliases_appear_and_invisible_ones_do_not() -> None:
     ids=["options", "bare", "subcommands"],
 )
 def test_usage_brackets_follow_the_command_shape(
-    build: Callable[[], Command], has_options: bool, command_bracket: str | None
+    build: Callable[[], Command],
+    has_options: bool,
+    command_bracket: str | None,
 ) -> None:
     usage = build().render_usage()
     assert ("[OPTIONS]" in usage) is has_options

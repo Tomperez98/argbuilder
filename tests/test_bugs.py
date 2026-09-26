@@ -308,11 +308,11 @@ def test_append_defaults_may_exceed_num_args_but_set_defaults_may_not() -> None:
     # An `append` argument accumulates, so more defaults than one occurrence
     # can hold are legal; a `set` argument cannot.
     Command("x").arg(
-        Arg("tag").long("tag").action("append").num_args(1).default_values(["a", "b"])
+        Arg("tag").long("tag").action("append").num_args(1).default_values(["a", "b"]),
     ).debug_assert()
     with panics("default values"):
         Command("x").arg(
-            Arg("name").long("name").num_args(1).default_values(["a", "b"])
+            Arg("name").long("name").num_args(1).default_values(["a", "b"]),
         ).debug_assert()
 
 

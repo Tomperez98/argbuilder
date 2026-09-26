@@ -76,14 +76,15 @@ _ORDER = list(_MENU)
 @st.composite
 def commands(draw: st.DrawFn) -> Command:
     keys = sorted(
-        draw(st.lists(st.sampled_from(_ORDER), unique=True, max_size=5)), key=_ORDER.index
+        draw(st.lists(st.sampled_from(_ORDER), unique=True, max_size=5)),
+        key=_ORDER.index,
     )
     cmd = Command("tool").about("A generated tool used to check rendering properties")
     for key in keys:
         cmd = cmd.arg(_MENU[key]())
     if draw(st.booleans()):
         cmd = cmd.subcommand(
-            Command("run").about("Runs it").arg(Arg("target").required(True).help("What to run"))
+            Command("run").about("Runs it").arg(Arg("target").required(True).help("What to run")),
         )
     return cmd
 
@@ -141,7 +142,11 @@ def _strip_ansi(text: str) -> str:
     override=st.one_of(st.none(), st.text(max_size=4)),
 )
 def test_style_for_always_respects_its_bounds(
-    is_tty: bool, columns: int | None, no_color: str | None, term: str | None, override: str | None
+    is_tty: bool,
+    columns: int | None,
+    no_color: str | None,
+    term: str | None,
+    override: str | None,
 ) -> None:
     env: dict[str, str] = {}
     if no_color is not None:

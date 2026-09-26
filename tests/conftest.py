@@ -36,7 +36,8 @@ def _import_example(name: str) -> ModuleType:
     if name in _EXAMPLES:
         return _EXAMPLES[name]
     spec = importlib.util.spec_from_file_location(
-        f"argbuilder_example_{name}", EXAMPLES_DIR / f"{name}.py"
+        f"argbuilder_example_{name}",
+        EXAMPLES_DIR / f"{name}.py",
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -91,7 +92,7 @@ def golden(request: pytest.FixtureRequest) -> Callable[[str, str], None]:
                     fromfile=f"golden/{name}.txt",
                     tofile="rendered now",
                     lineterm="",
-                )
+                ),
             )
             pytest.fail(
                 f"golden mismatch for {name!r}:\n{diff}\n"

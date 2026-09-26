@@ -166,7 +166,7 @@ def into_value_parser(like: object) -> ValueParser[Any]:
     if isinstance(like, str):
         bug(
             f"value_parser({like!r}): a str is ambiguous; "
-            f"pass a list of possible values like [{like!r}]"
+            f"pass a list of possible values like [{like!r}]",
         )
     if like is bool:
         return ValueParser.boolean()

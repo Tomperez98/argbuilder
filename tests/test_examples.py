@@ -73,7 +73,8 @@ def test_example_git_clone_dispatch(git: Any) -> None:
 
 
 def test_example_git_clone_rejects_a_non_url_as_a_value(
-    git: Any, golden: Callable[[str, str], None]
+    git: Any,
+    golden: Callable[[str, str], None],
 ) -> None:
     matches = git.cli().try_get_matches_from(["git", "clone", "not-a-url"])
     assert isinstance(matches, ArgMatches)

@@ -67,7 +67,10 @@ BLOCK_CASES: list[tuple[str, str | None, str | None, str | None, str]] = [
     ids=[name for name, *_ in BLOCK_CASES],
 )
 def test_render_lays_out_one_block_per_present_part(
-    tip: str | None, usage: str | None, help_hint: str | None, expected: str
+    tip: str | None,
+    usage: str | None,
+    help_hint: str | None,
+    expected: str,
 ) -> None:
     error = Error(ValueValidation(), "boom", tip, usage, help_hint)
     assert error.render() == expected
