@@ -1,4 +1,4 @@
-# argbuilder
+# argbuilder ([clap](https://docs.rs/clap/latest/clap/) for python)
 
 [![CI](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml/badge.svg)](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/argbuilder)](https://pypi.org/project/argbuilder/)
