@@ -1,0 +1,12 @@
+Clones repos
+
+Usage: git clone [OPTIONS] <REMOTE> [DIR]
+
+Arguments:
+  <REMOTE>  The remote to clone
+  [DIR]     Where to clone into
+
+Options:
+  -v, --verbose...    More output per occurrence
+      --color <WHEN>  Colorize output [default: auto] [possible values: always, auto, never]
+  -h, --help          Print help

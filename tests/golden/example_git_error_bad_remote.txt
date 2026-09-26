@@ -1,0 +1,5 @@
+error: 'not-a-url' is not a remote URL
+
+Usage: git clone [OPTIONS] <REMOTE> [DIR]
+
+For more information, try '--help'.

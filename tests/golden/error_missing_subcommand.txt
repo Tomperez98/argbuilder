@@ -1,0 +1,6 @@
+error: 'git' requires a subcommand but one was not provided
+  [subcommands: add, help]
+
+Usage: git [OPTIONS] <COMMAND>
+
+For more information, try '--help'.

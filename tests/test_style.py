@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,6 +17,9 @@ from argbuilder import (
     Style,
 )
 from argbuilder._style import MAX_WIDTH, MIN_WIDTH, style_for, terminal_style
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 CMD = (
     Command("tool")
@@ -38,40 +42,14 @@ def test_plain_is_the_default() -> None:
     assert "\x1b[" not in CMD.render_help()
 
 
-def test_help_wraps_beside_the_labels() -> None:
-    assert CMD.render_help(Style(width=50)) == (
-        "Does things with files, carefully and at length\n"
-        "\n"
-        "Usage: tool [OPTIONS] <INPUT>\n"
-        "\n"
-        "Arguments:\n"
-        "  <INPUT>  The file to read, which must already\n"
-        "           exist\n"
-        "\n"
-        "Options:\n"
-        "  -l, --level <LEVEL>  How hard to try [default:\n"
-        "                       low] [possible values: low,\n"
-        "                       high]\n"
-        "  -q\n"
-        "  -h, --help           Print help\n"
-    )
+def test_help_wraps_beside_the_labels(golden: Callable[[str, str], None]) -> None:
+    golden("help_tool_wrapped_width50", CMD.render_help(Style(width=50)))
 
 
-def test_help_moves_below_the_labels_when_too_narrow() -> None:
-    options = CMD.render_help(Style(width=MIN_WIDTH)).split("Options:\n")[1]
-    assert options == (
-        "  -l, --level <LEVEL>\n"
-        "          How hard\n"
-        "          to try\n"
-        "          [default:\n"
-        "          low]\n"
-        "          [possible\n"
-        "          values:\n"
-        "          low, high]\n"
-        "  -q\n"
-        "  -h, --help\n"
-        "          Print help\n"
-    )
+def test_help_moves_below_the_labels_when_too_narrow(
+    golden: Callable[[str, str], None],
+) -> None:
+    golden("help_tool_narrow", CMD.render_help(Style(width=MIN_WIDTH)))
 
 
 def test_color_does_not_shift_columns() -> None:

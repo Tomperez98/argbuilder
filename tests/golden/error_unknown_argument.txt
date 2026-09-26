@@ -1,0 +1,7 @@
+error: unexpected argument '--levl' found
+
+  tip: a similar argument exists: '--level'
+
+Usage: tool [OPTIONS] <INPUT> [EXTRA]...
+
+For more information, try '--help'.

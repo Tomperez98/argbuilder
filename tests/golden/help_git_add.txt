@@ -1,0 +1,8 @@
+Adds things
+
+Usage: git add [OPTIONS]
+
+Options:
+  -f          [short aliases: -F]
+  -v...       Be loud
+  -h, --help  Print help

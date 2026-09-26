@@ -1,0 +1,5 @@
+error: remote must be a URL
+
+Usage: git clone [OPTIONS] <REMOTE>
+
+For more information, try '--help'.
