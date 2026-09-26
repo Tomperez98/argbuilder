@@ -33,19 +33,20 @@ ignore = [
     "FBT003",
     "FIX002",
     "INP001",
+    "PLC0415",
     "PLR0911",
     "PLR0912",
     "PLR0913",
     "PLR0915",
     "PLR2004",
     "PT018",
+    "RET503",
     "S101",
+    "S105",
     "S108",
     "S311",
-    "TD003",
-    "S105",
     "S603",
-    "RET503"
+    "TD003",
 ]
 
 [lint.flake8-tidy-imports.banned-api]

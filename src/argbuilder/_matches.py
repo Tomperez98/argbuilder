@@ -36,7 +36,7 @@ class ArgMatches:
     and panics, as clap's typed getters do.
     """
 
-    __slots__ = ("_cmd", "_matched", "_subcommand")
+    __slots__ = ("_checked", "_cmd", "_matched", "_subcommand")
 
     def __init__(
         self,
@@ -47,6 +47,8 @@ class ArgMatches:
         self._cmd = cmd
         self._matched = matched
         self._subcommand = subcommand
+        self._checked: dict[tuple[str, type], tuple[Any, ...]] | None = None
+        """Type-checked values per `(id, type)`, filled lazily on the first read."""
 
     def __repr__(self) -> str:
         values = {id: matched.values for id, matched in self._matched.items()}
@@ -59,8 +61,8 @@ class ArgMatches:
             not arg.is_multiple,
             f"argument {id!r} can hold several values; use get_many({id!r}, ...)",
         )
-        values = self._values(id)
-        return None if not values else _checked(id, values[0], type_)
+        values = self._checked_values(id, type_)
+        return None if not values else values[0]
 
     def get_required[T](self, id: str, type_: type[T]) -> T:
         """The single value of an argument that is always present: `required(True)` or defaulted.
@@ -84,14 +86,14 @@ class ArgMatches:
             f"get_required({id!r}): num_args(0, ...) lets it be given without a value; "
             f"add default_missing_value() or use get_one({id!r}, ...)",
         )
-        values = self._values(id)
+        values = self._checked_values(id, type_)
         invariant(len(values) == 1, f"argument {id!r} resolved to {values!r}, not one value")
-        return _checked(id, values[0], type_)
+        return values[0]
 
     def get_many[T](self, id: str, type_: type[T]) -> tuple[T, ...]:
         """Every value of a value-taking argument, in order; empty when absent."""
         self._value_arg(id, "get_many")
-        return tuple(_checked(id, value, type_) for value in self._values(id))
+        return self._checked_values(id, type_)
 
     def get_flag(self, id: str) -> bool:
         arg = self._arg(id)
@@ -99,7 +101,7 @@ class ArgMatches:
             arg.action in ("set_true", "set_false"),
             f"get_flag({id!r}): argument uses action {arg.action!r}, not 'set_true' or 'set_false'",
         )
-        return _checked(id, self._values(id)[0], bool)
+        return self._checked_values(id, bool)[0]
 
     def get_count(self, id: str) -> int:
         arg = self._arg(id)
@@ -107,7 +109,7 @@ class ArgMatches:
             arg.action == "count",
             f"get_count({id!r}): argument uses action {arg.action!r}, not 'count'",
         )
-        return _checked(id, self._values(id)[0], int)
+        return self._checked_values(id, int)[0]
 
     def contains_id(self, id: str) -> bool:
         """True when the argument has a value from any source, defaults included."""
@@ -169,6 +171,22 @@ class ArgMatches:
     def _values(self, id: str) -> tuple[Any, ...]:
         matched = self._matched.get(id)
         return () if matched is None else matched.values
+
+    def _checked_values(self, id: str, type_: type) -> tuple[Any, ...]:
+        """The argument's values, each type-checked once per `(id, type_)` and remembered.
+
+        `ArgMatches` never changes after parsing, so re-reading an `append`
+        list returns the checked tuple instead of re-validating every element.
+        """
+        cache = self._checked
+        if cache is None:
+            cache = self._checked = {}
+        key = (id, type_)
+        cached = cache.get(key)
+        if cached is None:
+            cached = tuple(_checked(id, value, type_) for value in self._values(id))
+            cache[key] = cached
+        return cached
 
 
 def _checked[T](id: str, value: object, type_: type[T]) -> T:

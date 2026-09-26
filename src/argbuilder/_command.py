@@ -20,6 +20,7 @@ from argbuilder._spec import CommandSpec
 from argbuilder._style import PLAIN, Style
 
 if TYPE_CHECKING:
+    from argbuilder._build import ResolvedCommand
     from argbuilder._matches import ArgMatches
 
 _NO_ENV: Mapping[str, str] = MappingProxyType({})
@@ -43,11 +44,13 @@ class Command:
     unit test to catch them before a user does.
     """
 
-    __slots__ = ("_spec",)
+    __slots__ = ("_resolved_cache", "_spec")
     _spec: CommandSpec
+    _resolved_cache: ResolvedCommand | None
 
     def __init__(self, name: str) -> None:
         self._spec = CommandSpec(name=_check_name("Command name", name))
+        self._resolved_cache = None
 
     def __repr__(self) -> str:
         return f"Command({self._spec.name!r})"
@@ -58,7 +61,18 @@ class Command:
     def _with(self, **changes: Any) -> Command:
         new: Command = Command.__new__(Command)
         new._spec = dataclasses.replace(self._spec, **changes)
+        new._resolved_cache = None
         return new
+
+    def _resolved(self) -> ResolvedCommand:
+        """The resolved tree, built once and remembered on this immutable command.
+
+        `build()` is `lru_cache`d, but hashing the whole `CommandSpec` tree on
+        every parse costs ~15% of a parse; the instance slot avoids that.
+        """
+        if self._resolved_cache is None:
+            self._resolved_cache = build(self._spec)
+        return self._resolved_cache
 
     # -- definition ---------------------------------------------------------
 
@@ -165,7 +179,7 @@ class Command:
 
         Put `cli().debug_assert()` in a unit test, as clap recommends.
         """
-        build(self._spec)
+        self._resolved()
 
     def try_get_matches_from(
         self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV
@@ -184,16 +198,18 @@ class Command:
         invariant(len(tokens) >= 1, "argv must start with the binary name, like sys.argv")
         invariant(
             all(isinstance(token, str) for token in tokens),
-            f"argv must hold str, got {tokens!r}",
+            "argv must hold str",
         )
         invariant(
             isinstance(env, Mapping)
             and all(
                 isinstance(name, str) and isinstance(value, str) for name, value in env.items()
             ),
-            f"env must be a mapping of str to str, got {env!r}",
+            # The message is static on purpose: an f-string here would repr the
+            # whole environment (hundreds of vars) on every parse, win or lose.
+            "env must be a mapping of str to str",
         )
-        return parse(build(self._spec), tokens[1:], env)
+        return parse(self._resolved(), tokens[1:], env)
 
     def get_matches_from(self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> ArgMatches:
         """Like `try_get_matches_from`, but print the error and exit on failure."""
@@ -212,7 +228,7 @@ class Command:
             isinstance(style, Style),
             f"{self!r}.render_help() takes a Style, got {style!r}",
         )
-        return render_help(build(self._spec), style)
+        return render_help(self._resolved(), style)
 
     def render_markdown(self) -> str:
         """Markdown documentation for this command and every subcommand below it.
@@ -223,13 +239,13 @@ class Command:
         inherited global argument is documented again on each subcommand,
         the same as `--help` shows it there.
         """
-        return render_markdown(build(self._spec))
+        return render_markdown(self._resolved())
 
     def render_usage(self) -> str:
-        return f"Usage: {render_usage(build(self._spec))}"
+        return f"Usage: {render_usage(self._resolved())}"
 
     def render_version(self) -> str:
-        return render_version(build(self._spec))
+        return render_version(self._resolved())
 
     def error(self, kind: ErrorKind, message: str) -> Error:
         """Report your own post-parse validation failure in the same format.
@@ -239,7 +255,7 @@ class Command:
         The usage line is this command's. For a failure inside a subcommand,
         prefer `ArgMatches.error()` on that subcommand's matches.
         """
-        return usage_error(build(self._spec), kind, message)
+        return usage_error(self._resolved(), kind, message)
 
 
 def _check_name(what: str, name: object) -> str:

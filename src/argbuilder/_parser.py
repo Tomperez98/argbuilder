@@ -6,7 +6,6 @@ produced only by the caller at the edge (`Error.exit()`).
 
 from __future__ import annotations
 
-import difflib
 import functools
 from typing import TYPE_CHECKING, Any
 
@@ -74,11 +73,11 @@ class _Parser:
         self._escaped = False
         """After a literal "--", every token is positional; a `last` positional opens up."""
 
-    def run(self, tokens: Sequence[str]) -> ArgMatches | Error:
+    def run(self, tokens: Sequence[str], start: int = 0) -> ArgMatches | Error:
         cmd = self._cmd
-        if cmd.arg_required_else_help and not tokens:
+        if cmd.arg_required_else_help and start >= len(tokens):
             return _help_error(DisplayHelpOnMissingArgumentOrSubcommand(), cmd)
-        index = 0
+        index = start
         while index < len(tokens):
             token = tokens[index]
             if self._escaped:
@@ -98,7 +97,7 @@ class _Parser:
                     (*self._ancestors, cmd),
                     self._globals,
                 )
-                sub = child.run(tokens[index + 1 :])
+                sub = child.run(tokens, index + 1)
                 if isinstance(sub, Error):
                     return sub
                 if name == "help" and cmd.help_subcommand:
@@ -110,7 +109,8 @@ class _Parser:
             if isinstance(step, Error):
                 return step
             # Each step consumes >= 1 token, so the loop runs at most len(tokens) times.
-            invariant(step > index, f"parser made no progress at token {token!r}")
+            # Static message: an f-string here would format a token on every step.
+            invariant(step > index, "parser made no progress")
             index = step
         return self._finish()
 
@@ -259,17 +259,17 @@ class _Parser:
             bug(f"argument {arg.id!r} takes values but has no parser")
         if arg.value_delimiter is not None:
             raws = [piece for raw in raws for piece in raw.split(arg.value_delimiter)]
-        shown = display_arg(arg)
         if not arg.is_positional and len(raws) < arg.min_values:
-            return self._error(TooFewValues(shown, arg.min_values, len(raws), env))
+            return self._error(TooFewValues(display_arg(arg), arg.min_values, len(raws), env))
         if not arg.is_positional and arg.max_values is not None and len(raws) > arg.max_values:
-            return self._error(TooManyValues(shown, raws[arg.max_values], env))
+            return self._error(TooManyValues(display_arg(arg), raws[arg.max_values], env))
         values: list[Any] = []
         for raw in raws:
             value = parser.parse(raw)
             if not isinstance(value, Invalid):
                 values.append(value)
                 continue
+            shown = display_arg(arg)
             if parser.possible_values:
                 closest = _closest(raw, list(parser.possible_values))
                 kind = InvalidValue(shown, raw, value.message, parser.possible_values, closest, env)
@@ -311,7 +311,7 @@ class _Parser:
         cmd = self._cmd
         explicit = {id for id, m in matched.items() if m.source != "default_value"}
 
-        for arg in cmd.args:
+        for arg in cmd.conflicting_args:
             if arg.id not in explicit:
                 continue
             for other in sorted(arg.conflicts_with & explicit):
@@ -322,13 +322,13 @@ class _Parser:
                 return self._conflict(present[0], present[1])
 
         missing: list[str] = [
-            display_arg(arg) for arg in cmd.args if arg.required and arg.id not in explicit
+            display_arg(arg) for arg in cmd.required_args if arg.id not in explicit
         ]
         for group in cmd.groups:
             if group.required and not any(member in explicit for member in group.members):
                 members = "|".join(display_arg(cmd.by_id[member]) for member in group.members)
                 missing.append(f"<{members}>")
-        for arg in cmd.args:
+        for arg in cmd.requiring_args:
             if arg.id not in explicit:
                 continue
             for needed in sorted(arg.requires - explicit):
@@ -338,10 +338,10 @@ class _Parser:
         if missing:
             return self._error(MissingRequiredArgument(tuple(missing)))
 
-        for arg in cmd.positionals:
+        for arg, min_values in cmd.arity_mins:
             count = len(self._local.get(arg.id, ()))
-            if 0 < count < arg.min_values:
-                return self._error(TooFewValues(display_arg(arg), arg.min_values, count))
+            if 0 < count < min_values:
+                return self._error(TooFewValues(display_arg(arg), min_values, count))
         if cmd.subcommand_required and self._subcommand is None:
             return self._error(MissingSubcommand(" ".join(cmd.path), tuple(cmd.subcommands)))
         return None
@@ -443,6 +443,8 @@ def _owns(cmd: ResolvedCommand, flag: str) -> bool:
 
 
 def _closest(typed: str, candidates: list[str]) -> str | None:
+    import difflib
+
     matches = difflib.get_close_matches(typed, candidates, n=1)
     return matches[0] if matches else None
 
