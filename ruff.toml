@@ -1,0 +1,7 @@
+line-length = 100
+
+[lint]
+extend-select = ["TID", "UP"]
+
+[lint.flake8-tidy-imports.banned-api]
+"enum".msg = "Do not use Enums. Use typing.Literal or Union types instead to maintain a lightweight API."
