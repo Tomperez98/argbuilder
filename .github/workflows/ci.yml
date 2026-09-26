@@ -5,13 +5,23 @@ on:
     branches: [main]
   pull_request:
   merge_group:
+  # Weekly, so a new Python patch release or runner image that breaks the
+  # suite shows up without a commit. GitHub emails failures of scheduled
+  # runs to whoever last edited this cron line.
+  schedule:
+    - cron: "17 6 * * 1"
+  # The release workflow runs this exact suite against the tag commit.
+  # setup-uv turns its cache off by itself for tag pushes, so a release
+  # never restores a cache another ref could have written.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Only superseded PR pushes are cancelled: every commit on main keeps its
+  # own result, so a release can point at a commit that is known green.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   # Version-independent checks, run once: rot fast, and keep the slow test
@@ -20,24 +30,29 @@ jobs:
     name: Lint, type, build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          version: "0.12.17" # keep in sync with mise.toml [tools]
-          enable-cache: true
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install: "false" # uv comes from setup-uv, above
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
       - name: Lint, format, type-check
         run: mise run ci:fast
-      - name: Build and smoke-test the wheel (publishes nothing)
-        run: mise run smoke
+      - name: Build, and check dist/ holds exactly this version (publishes nothing)
+        run: mise run dist:check
 
   test:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -47,12 +62,15 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          version: "0.12.17" # keep in sync with mise.toml [tools]
-          enable-cache: true
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install: "false"
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
       - name: Test
         run: mise run test
+      - name: Install the wheel into a clean venv and run the examples
+        run: mise run smoke

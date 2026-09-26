@@ -1,50 +1,84 @@
 name: Release
 
-# Publishing uses PyPI trusted publishing (OIDC), so no API token is stored.
-# One-time setup on PyPI: add a trusted publisher with
-#   owner: Tomperez98, repo: argbuilder, workflow: release.yml, environment: pypi
+# Cut a release:
+#   1. Bump the version in a PR (`uv version --bump patch`) and merge it.
+#   2. `mise run release:tag` tags that commit on origin/main and pushes the tag.
+# If a run fails, fix the cause and use "Re-run failed jobs": every step
+# skips work that is already done, so no version is burned.
 #
-# Cut a release with:
-#   git tag v0.2.0 && git push origin v0.2.0
-# Manual runs must target the release tag so the version check below applies.
+# One-time setup, outside this file:
+# - PyPI trusted publisher: owner Tomperez98, repo argbuilder,
+#   workflow release.yml, environment pypi. No API token is stored.
+# - Environment `pypi` (Settings > Environments): deployment rule "selected
+#   tags" = `v*`; a required reviewer, or a wait timer if you're the only
+#   maintainer.
+# - Tag ruleset for `v*`: block updates and deletions, so a published tag
+#   never moves.
+# - Branch ruleset for main: require the CI checks and the merge queue.
+# GitHub emails the person who pushed the tag when any job here fails.
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 # Never cancel a release partway through, and never run two at once.
+# Scheduled runs of release_validate.yml share this group, so they never
+# check a release that is still being published.
 concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: pypi
-      url: https://pypi.org/p/argbuilder
+  # The exact suite CI runs, the whole Python matrix, on the tag commit.
+  ci:
+    uses: ./.github/workflows/ci.yml
     permissions:
-      id-token: write # trusted publishing
       contents: read
+
+  # No secrets and no publish permission: this job installs and runs the dev
+  # dependencies, so it must not be able to mint a PyPI token.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 0 # full history so the lineage check below can find the merge base
+          # The lineage check below needs the commit graph, not old files:
+          # fetch every commit but only this commit's trees and blobs.
+          fetch-depth: 0
+          filter: tree:0
+          persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-        with:
-          version: "0.12.17" # keep in sync with mise.toml [tools]
-          enable-cache: true
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install: "false"
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
 
       # Preconditions: fail before any side effect, not halfway through.
       # (bugs panic; a registry/network failure is the only retryable kind)
+      - name: Check the tag matches the pyproject version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "::error::releases run from a tag, not a $REF_TYPE"
+            exit 1
+          fi
+          version="$(uv version --short)"
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match pyproject version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Check the commit is on main
         run: |
           # Never publish a tag that points off mainline (e.g. a GitButler
@@ -54,25 +88,106 @@ jobs:
             echo "::error::tag commit $(git rev-parse --short HEAD) is not on main; refusing to publish"
             exit 1
           fi
-      - name: Check the tag matches the pyproject version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          version="$(uv version --short)"
-          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject version $version"
-            exit 1
-          fi
-      - name: Check the version is not already on PyPI
-        run: |
-          version="$(uv version --short)"
-          if curl -fsS "https://pypi.org/pypi/argbuilder/$version/json" > /dev/null; then
-            echo "::error::argbuilder $version already exists on PyPI; versions are immutable"
-            exit 1
-          fi
 
-      # Run the exact suite CI runs — including building and smoke-testing —
-      # so a tag never publishes untested code. Publish only those bytes.
-      - name: Run the full check suite
-        run: mise run ci
-      - name: Publish to PyPI
+      - name: Build, check dist/, install the wheel and run the examples
+        run: mise run smoke
+      - name: Check PyPI (new version, or a partial upload of these exact bytes)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: uv run --no-project python scripts/release.py preflight "$VERSION"
+      - name: Write the install and compatibility notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: uv run --no-project python scripts/release.py notes "$VERSION" > notes.md
+
+      # These are the bytes that were just tested; publish uploads them as-is.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notes
+          path: notes.md
+          if-no-files-found: error
+
+  publish:
+    needs: [ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/project/argbuilder/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write # trusted publishing
+      contents: read
+    steps:
+      # Checked out only for mise.toml (the pinned uv) and scripts/release.py;
+      # no dev dependencies are installed in this job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      # Checked again: PyPI can change while the deployment waits for approval.
+      - name: Check PyPI again, right before uploading
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: uv run --no-project python scripts/release.py preflight "$VERSION"
+      - name: Publish to PyPI (skips files already uploaded)
         run: mise run publish
+
+  # Visible last: the GitHub release (the changelog users read) only appears
+  # once PyPI has the files.
+  github-release:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: notes
+      - name: Create, upload, then publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          if [ "$state" = "false" ]; then
+            echo "release $TAG is already published; nothing to do"
+            exit 0
+          fi
+          if [ "$state" = "missing" ]; then
+            # The notes lead with install and compatibility facts; GitHub
+            # appends the merged PRs, which you then edit for readers.
+            gh release create "$TAG" --draft --verify-tag \
+              --title "argbuilder $VERSION" \
+              --notes-file notes.md --generate-notes
+          fi
+          gh release upload "$TAG" --clobber dist/*.whl dist/*.tar.gz
+          gh release edit "$TAG" --draft=false --latest
+
+  # Check what users actually get, from the outside: PyPI serves exactly
+  # these bytes, it's `latest`, and `pip install` works on every Python.
+  validate:
+    needs: github-release
+    uses: ./.github/workflows/release_validate.yml
+    permissions:
+      contents: read

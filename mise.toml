@@ -27,10 +27,20 @@ description = "Build the sdist and wheel (publishes nothing)"
 depends = ["sync"]
 run = "uv build --clear"
 
-[tasks.smoke]
-description = "Install the built wheel into a clean venv and import it"
+[tasks."dist:check"]
+description = "Assert dist/ holds exactly this version's sdist and wheel"
 depends = ["build"]
-run = "rm -rf .smoke && uv venv --quiet .smoke && uv pip install --quiet --python .smoke/bin/python dist/*.whl && .smoke/bin/python -c 'import argbuilder; print(argbuilder.__file__)'"
+run = "uv run --no-project python scripts/release.py check-dist \"$(uv version --short)\""
+
+[tasks.smoke]
+description = "Install the built wheel into a clean venv; check its version and run the examples"
+depends = ["dist:check"]
+run = """
+rm -rf .smoke
+uv venv --quiet .smoke
+uv pip install --quiet --python .smoke/bin/python dist/*.whl
+.smoke/bin/python scripts/release.py smoke "$(uv version --short)" examples
+"""
 
 [tasks."ci:fast"]
 description = "Fast checks, safe to run on every save"
@@ -40,6 +50,10 @@ depends = ["lint", "format", "typecheck"]
 description = "The full suite: the same command CI runs"
 depends = ["ci:fast", "test", "smoke"]
 
+[tasks."release:tag"]
+description = "Tag the version on origin/main and push the tag, which starts the release"
+run = "uv run --no-project python scripts/release.py tag"
+
 [tasks.publish]
-description = "Publish the artifacts already in dist/ (release job only)"
-run = "uv publish --trusted-publishing always"
+description = "Publish the artifacts already in dist/ (release job only); skips files PyPI already has"
+run = "uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist/*.whl dist/*.tar.gz"

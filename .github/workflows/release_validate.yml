@@ -1,0 +1,120 @@
+name: Release (validate)
+
+# Check the latest release the way a user gets it: from PyPI, into a clean
+# environment. Runs at the end of every release, and daily, because PyPI and
+# new Python releases change without this repo changing. GitHub emails
+# failures of the daily run to whoever last edited its cron line.
+#
+# The checks run from main against the latest tag, so a bug in the checks
+# is fixed on main without cutting a release.
+
+on:
+  # release.yml calls this as its last job, once everything is published.
+  workflow_call:
+  schedule:
+    - cron: "41 7 * * 0"
+  workflow_dispatch:
+
+# Scheduled and manual runs share the release lock, so they never check a
+# release that is still being published. When release.yml calls this, it
+# already holds that lock, so the call gets a group of its own instead of
+# deadlocking on it. (A run that is only queued can be replaced by a newer
+# one in the same group; a replaced release never started, so re-run it.)
+concurrency:
+  group: ${{ github.event_name == 'push' && format('release-validate-{0}', github.run_id) || 'release' }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  pypi:
+    name: PyPI serves exactly the released bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.latest.outputs.tag }}
+      version: ${{ steps.latest.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main # the default shallow clone: tags are listed from the remote
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
+      - name: Find the latest release tag
+        id: latest
+        run: |
+          # Tag names only, straight from the remote: no history needed.
+          tag="$(git ls-remote --tags --refs --sort=-v:refname origin 'v*' | head -n 1 | sed 's|.*refs/tags/||')"
+          if [ -z "$tag" ]; then
+            echo "::error::no v* tags; nothing has been released"
+            exit 1
+          fi
+          echo "validating $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+      - name: Get the released bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.latest.outputs.tag }}
+        run: |
+          # The GitHub release holds the artifact the release job built and
+          # tested. Releases made before it existed are rebuilt from the tag
+          # instead (uv_build output is reproducible).
+          rm -rf dist
+          if ! gh release download "$TAG" --dir dist --pattern '*.whl' --pattern '*.tar.gz'; then
+            echo "no GitHub release assets for $TAG; rebuilding from the tag"
+            git fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+            git worktree add --quiet --detach released "$TAG"
+            uv build --quiet --out-dir dist released
+          fi
+      - name: Compare with PyPI, and check it is the latest there
+        env:
+          VERSION: ${{ steps.latest.outputs.version }}
+        run: uv run --no-project python scripts/release.py verify-pypi "$VERSION"
+
+  install:
+    name: pip install on Python ${{ matrix.python-version }}
+    needs: pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          persist-credentials: false
+      # The examples as they were at the release: main's may use newer API.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.pypi.outputs.tag }}
+          path: released
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
+      - name: Install from PyPI into a clean venv, the way a user would
+        env:
+          PYTHON: ${{ matrix.python-version }}
+          VERSION: ${{ needs.pypi.outputs.version }}
+        run: |
+          uv venv --quiet --seed --python "$PYTHON" /tmp/user
+          /tmp/user/bin/python -m pip install --quiet --no-cache-dir "argbuilder==$VERSION"
+      - name: Check the version and run the released examples
+        env:
+          VERSION: ${{ needs.pypi.outputs.version }}
+        run: /tmp/user/bin/python scripts/release.py smoke "$VERSION" released/examples

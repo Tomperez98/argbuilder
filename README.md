@@ -319,8 +319,12 @@ uv run pytest               # tests
 ```
 
 CI runs the fast checks once and the tests on Python 3.12–3.14
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Releases publish to
-PyPI from CI when a `v*` tag is pushed
-([`.github/workflows/release.yml`](.github/workflows/release.yml)).
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). To release, bump the
+version in a PR (`uv version --bump patch`), merge it, then run
+`mise run release:tag`: the tag triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which
+publishes to PyPI and then checks the published package
+([`.github/workflows/release_validate.yml`](.github/workflows/release_validate.yml),
+also run daily).
 
 [clap]: https://docs.rs/clap/latest/clap/_tutorial/index.html
