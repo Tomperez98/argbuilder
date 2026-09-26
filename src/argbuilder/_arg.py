@@ -1,16 +1,22 @@
 """`Arg` and `ArgGroup`: fluent, immutable builders in the style of clap's builder API."""
 
+from __future__ import annotations
+
 import dataclasses
-from collections.abc import Iterable
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 from argbuilder._invariant import bug, invariant
 from argbuilder._spec import ArgAction, ArgSpec, GroupSpec, check_action
 from argbuilder._value_parser import ValueParserLike, into_value_parser
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 
 def _check_bool(owner: str, method: str, value: object) -> bool:
-    invariant(isinstance(value, bool), f"{owner}.{method}() takes a bool, got {value!r}")
+    invariant(
+        isinstance(value, bool), f"{owner}.{method}() takes a bool, got {value!r}"
+    )
     return bool(value)
 
 
@@ -45,7 +51,7 @@ class Arg:
         return self._spec.id
 
     def _with(self, **changes: Any) -> Arg:
-        new = Arg.__new__(Arg)
+        new: Arg = Arg.__new__(Arg)
         new._spec = dataclasses.replace(self._spec, **changes)
         return new
 
@@ -79,7 +85,9 @@ class Arg:
     def visible_short_alias(self, char: str) -> Arg:
         """An extra `-c`, listed in help as `[short aliases: -c]`."""
         char = _check_short(self._owner, "visible_short_alias", char)
-        return self._with(visible_short_aliases=(*self._spec.visible_short_aliases, char))
+        return self._with(
+            visible_short_aliases=(*self._spec.visible_short_aliases, char)
+        )
 
     def global_(self, yes: bool) -> Arg:
         """Also accept this option in every subcommand below, and read it at any level.
@@ -91,7 +99,9 @@ class Arg:
         return self._with(global_=_check_bool(self._owner, "global_", yes))
 
     def help(self, text: str) -> Arg:
-        invariant(isinstance(text, str), f"{self._owner}.help() takes a str, got {text!r}")
+        invariant(
+            isinstance(text, str), f"{self._owner}.help() takes a str, got {text!r}"
+        )
         return self._with(help=text)
 
     def value_name(self, name: str) -> Arg:
@@ -174,7 +184,9 @@ class Arg:
         return self._with(env=name)
 
     def conflicts_with(self, id: str) -> Arg:
-        return self._with(conflicts_with=self._spec.conflicts_with | {_check_id("Arg", id)})
+        return self._with(
+            conflicts_with=self._spec.conflicts_with | {_check_id("Arg", id)}
+        )
 
     def conflicts_with_all(self, ids: Iterable[str]) -> Arg:
         checked = {_check_id("Arg", id) for id in ids}
@@ -185,7 +197,9 @@ class Arg:
 
     def allow_hyphen_values(self, yes: bool) -> Arg:
         """Accept values starting with `-`, such as `-5`, without `=` or `--`."""
-        return self._with(allow_hyphen_values=_check_bool(self._owner, "allow_hyphen_values", yes))
+        return self._with(
+            allow_hyphen_values=_check_bool(self._owner, "allow_hyphen_values", yes)
+        )
 
     def value_delimiter(self, char: str) -> Arg:
         """Split each value on `char`: `--tags a,b,c`."""
@@ -202,7 +216,10 @@ class Arg:
 
 def _check_short(owner: str, method: str, char: object) -> str:
     invariant(
-        isinstance(char, str) and len(char) == 1 and char not in "-=" and not char.isspace(),
+        isinstance(char, str)
+        and len(char) == 1
+        and char not in "-="
+        and not char.isspace(),
         f"{owner}.{method}() takes one character other than '-' or '=', got {char!r}",
     )
     return str(char)
@@ -236,7 +253,7 @@ class ArgGroup:
         return f"ArgGroup({self._spec.id!r})"
 
     def _with(self, **changes: Any) -> ArgGroup:
-        new = ArgGroup.__new__(ArgGroup)
+        new: ArgGroup = ArgGroup.__new__(ArgGroup)
         new._spec = dataclasses.replace(self._spec, **changes)
         return new
 

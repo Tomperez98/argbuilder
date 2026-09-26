@@ -4,12 +4,12 @@ No IO, no globals: the environment arrives as a mapping, and output is
 produced only by the caller at the edge (`Error.exit()`).
 """
 
+from __future__ import annotations
+
 import difflib
 import functools
-from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from argbuilder._build import ResolvedArg, ResolvedCommand
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -32,6 +32,11 @@ from argbuilder._invariant import bug, invariant
 from argbuilder._matches import ArgMatches, MatchedArg
 from argbuilder._spec import takes_values
 from argbuilder._value_parser import Invalid, parse_boolish
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, Sequence
+
+    from argbuilder._build import ResolvedArg, ResolvedCommand
 
 
 def parse(
@@ -86,7 +91,10 @@ class _Parser:
             elif token in cmd.subcommand_names:
                 name = cmd.subcommand_names[token]
                 child = _Parser(
-                    cmd.subcommands[name], self._env, (*self._ancestors, cmd), self._globals
+                    cmd.subcommands[name],
+                    self._env,
+                    (*self._ancestors, cmd),
+                    self._globals,
                 )
                 sub = child.run(tokens[index + 1 :])
                 if isinstance(sub, Error):
@@ -118,7 +126,9 @@ class _Parser:
             ]
             return self._unknown(token, index, f"--{name}", candidates)
         if takes_values(arg.action):
-            return self._take_values(arg, inline if has_value else None, tokens, index + 1)
+            return self._take_values(
+                arg, inline if has_value else None, tokens, index + 1
+            )
         if has_value:
             return self._unexpected_value(arg, inline)
         return self._flag(arg, index + 1)
@@ -153,7 +163,8 @@ class _Parser:
             if self._cmd.subcommands:
                 closest = _closest(token, _visible_subcommand_names(self._cmd))
                 return self._error(
-                    InvalidSubcommand(token, closest), tip=_similar_tip("subcommand", closest)
+                    InvalidSubcommand(token, closest),
+                    tip=_similar_tip("subcommand", closest),
                 )
             return self._error(UnknownArgument(token))
         values = self._parse_values(arg, [token], env=None)
@@ -165,7 +176,9 @@ class _Parser:
             self._positional_index += 1
         return index + 1
 
-    def _unknown(self, token: str, index: int, flag: str, candidates: list[str]) -> int | Error:
+    def _unknown(
+        self, token: str, index: int, flag: str, candidates: list[str]
+    ) -> int | Error:
         """`token` names no argument here; `flag` is the `--name` or `-c` it starts with."""
         current = self._current_positional()
         if current is not None and current.allow_hyphen_values:
@@ -247,7 +260,11 @@ class _Parser:
         shown = display_arg(arg)
         if not arg.is_positional and len(raws) < arg.min_values:
             return self._error(TooFewValues(shown, arg.min_values, len(raws), env))
-        if not arg.is_positional and arg.max_values is not None and len(raws) > arg.max_values:
+        if (
+            not arg.is_positional
+            and arg.max_values is not None
+            and len(raws) > arg.max_values
+        ):
             return self._error(TooManyValues(shown, raws[arg.max_values], env))
         values: list[Any] = []
         for raw in raws:
@@ -257,7 +274,9 @@ class _Parser:
                 continue
             if parser.possible_values:
                 closest = _closest(raw, list(parser.possible_values))
-                kind = InvalidValue(shown, raw, value.message, parser.possible_values, closest, env)
+                kind = InvalidValue(
+                    shown, raw, value.message, parser.possible_values, closest, env
+                )
                 return self._error(kind, tip=_similar_tip("value", closest))
             return self._error(InvalidValue(shown, raw, value.message, env=env))
         return values
@@ -289,7 +308,9 @@ class _Parser:
             return self._parse_values(arg, [raw], arg.env)
         flag = parse_boolish(raw)
         if isinstance(flag, Invalid):
-            return self._error(InvalidValue(display_arg(arg), raw, flag.message, env=arg.env))
+            return self._error(
+                InvalidValue(display_arg(arg), raw, flag.message, env=arg.env)
+            )
         return [flag if arg.action == "set_true" else not flag]
 
     def _validate(self, matched: Mapping[str, MatchedArg]) -> Error | None:
@@ -302,17 +323,24 @@ class _Parser:
             for other in sorted(arg.conflicts_with & explicit):
                 return self._conflict(arg, cmd.by_id[other])
         for group in cmd.groups:
-            present = [cmd.by_id[member] for member in group.members if member in explicit]
+            present = [
+                cmd.by_id[member] for member in group.members if member in explicit
+            ]
             if not group.multiple and len(present) > 1:
                 return self._conflict(present[0], present[1])
 
-        missing: list[str] = []
-        for arg in cmd.args:
-            if arg.required and arg.id not in explicit:
-                missing.append(display_arg(arg))
+        missing: list[str] = [
+            display_arg(arg)
+            for arg in cmd.args
+            if arg.required and arg.id not in explicit
+        ]
         for group in cmd.groups:
-            if group.required and not any(member in explicit for member in group.members):
-                members = "|".join(display_arg(cmd.by_id[member]) for member in group.members)
+            if group.required and not any(
+                member in explicit for member in group.members
+            ):
+                members = "|".join(
+                    display_arg(cmd.by_id[member]) for member in group.members
+                )
                 missing.append(f"<{members}>")
         for arg in cmd.args:
             if arg.id not in explicit:
@@ -327,9 +355,13 @@ class _Parser:
         for arg in cmd.positionals:
             count = len(self._local.get(arg.id, ()))
             if 0 < count < arg.min_values:
-                return self._error(TooFewValues(display_arg(arg), arg.min_values, count))
+                return self._error(
+                    TooFewValues(display_arg(arg), arg.min_values, count)
+                )
         if cmd.subcommand_required and self._subcommand is None:
-            return self._error(MissingSubcommand(" ".join(cmd.path), tuple(cmd.subcommands)))
+            return self._error(
+                MissingSubcommand(" ".join(cmd.path), tuple(cmd.subcommands))
+            )
         return None
 
     # -- helpers ------------------------------------------------------------
@@ -394,7 +426,9 @@ def _help_for(cmd: ResolvedCommand, names: Sequence[str]) -> Error:
         if canonical is None:
             closest = _closest(name, _visible_subcommand_names(target))
             kind = InvalidSubcommand(name, closest)
-            return usage_error(target, kind, describe(kind), _similar_tip("subcommand", closest))
+            return usage_error(
+                target, kind, describe(kind), _similar_tip("subcommand", closest)
+            )
         target = target.subcommands[canonical]
     return _help_error(DisplayHelp(), target)
 
@@ -416,10 +450,11 @@ def _descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
 
 
 def _owns(cmd: ResolvedCommand, flag: str) -> bool:
-    if flag.startswith("--"):
-        arg = cmd.by_long.get(flag[2:])
-    else:
-        arg = cmd.by_short.get(flag[1:])
+    arg = (
+        cmd.by_long.get(flag[2:])
+        if flag.startswith("--")
+        else cmd.by_short.get(flag[1:])
+    )
     # An inherited global belongs to the ancestor that defined it, which is listed already.
     return arg is not None and not arg.hide and arg.id not in cmd.inherited
 

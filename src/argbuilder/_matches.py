@@ -1,14 +1,19 @@
 """`ArgMatches`: typed, read-only access to what was parsed."""
 
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Literal
+from __future__ import annotations
 
-from argbuilder._build import ResolvedArg, ResolvedCommand
-from argbuilder._error import Error, ErrorKind
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
+
 from argbuilder._help import usage_error
 from argbuilder._invariant import bug, invariant
 from argbuilder._spec import takes_values
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from argbuilder._build import ResolvedArg, ResolvedCommand
+    from argbuilder._error import Error, ErrorKind
 
 type ValueSource = Literal["default_value", "env_variable", "command_line"]
 """Where an argument's value came from, in increasing precedence.
@@ -80,7 +85,9 @@ class ArgMatches:
             f"add default_missing_value() or use get_one({id!r}, ...)",
         )
         values = self._values(id)
-        invariant(len(values) == 1, f"argument {id!r} resolved to {values!r}, not one value")
+        invariant(
+            len(values) == 1, f"argument {id!r} resolved to {values!r}, not one value"
+        )
         return _checked(id, values[0], type_)
 
     def get_many[T](self, id: str, type_: type[T]) -> tuple[T, ...]:
@@ -148,7 +155,9 @@ class ArgMatches:
     def _arg(self, id: str) -> ResolvedArg:
         arg = self._cmd.by_id.get(id)
         if arg is None:
-            bug(f"unknown argument id {id!r}; defined ids: {', '.join(self._cmd.by_id)}")
+            bug(
+                f"unknown argument id {id!r}; defined ids: {', '.join(self._cmd.by_id)}"
+            )
         return arg
 
     def _value_arg(self, id: str, method: str) -> ResolvedArg:

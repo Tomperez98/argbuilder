@@ -1,12 +1,16 @@
 """The one error vocabulary for *user* mistakes on the command line."""
 
+from __future__ import annotations
+
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from argbuilder._invariant import check_variant, invariant, variant_classes
 from argbuilder._style import PLAIN, Style, terminal_style
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # -- ErrorKind: why parsing stopped (the relevant subset of clap's `ErrorKind`)
 #
@@ -181,7 +185,9 @@ def describe(kind: ParseFailure) -> str:
 
 
 def _where(argument: str, env: str | None) -> str:
-    return f"'{argument}'" + ("" if env is None else f" (from environment variable {env})")
+    return f"'{argument}'" + (
+        "" if env is None else f" (from environment variable {env})"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,13 +202,16 @@ class Error:
     tip: str | None = None
     usage: str | None = None
     help_hint: str | None = None
-    restyle: Callable[[Style], str] | None = field(default=None, repr=False, compare=False)
+    restyle: Callable[[Style], str] | None = field(
+        default=None, repr=False, compare=False
+    )
     """Renders `message` again for a given `Style`. Set for help, which can wrap and color."""
 
     def __post_init__(self) -> None:
         check_variant(self.kind, _ERROR_KINDS, "ErrorKind", "Error kind")
         invariant(
-            isinstance(self.message, str), f"Error message must be a str, got {self.message!r}"
+            isinstance(self.message, str),
+            f"Error message must be a str, got {self.message!r}",
         )
 
     @property
@@ -216,7 +225,8 @@ class Error:
     def render(self, style: Style = PLAIN) -> str:
         """The text `exit()` prints. Plain unless you pass a `Style`."""
         if isinstance(
-            self.kind, DisplayHelp | DisplayVersion | DisplayHelpOnMissingArgumentOrSubcommand
+            self.kind,
+            DisplayHelp | DisplayVersion | DisplayHelpOnMissingArgumentOrSubcommand,
         ):
             return self.message if self.restyle is None else self.restyle(style)
         blocks = [f"{style.error('error:')} {self.message}"]

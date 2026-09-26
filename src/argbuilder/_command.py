@@ -1,21 +1,26 @@
 """`Command`: the root builder, and the only place that touches the process."""
 
+from __future__ import annotations
+
 import dataclasses
 import os
 import sys
-from collections.abc import Iterable, Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from argbuilder._arg import Arg, ArgGroup, _check_bool
 from argbuilder._build import build
 from argbuilder._error import Error, ErrorKind
 from argbuilder._help import render_help, render_usage, render_version, usage_error
 from argbuilder._invariant import invariant
-from argbuilder._matches import ArgMatches
 from argbuilder._parser import parse
 from argbuilder._spec import CommandSpec
 from argbuilder._style import PLAIN, Style
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from argbuilder._matches import ArgMatches
 
 _NO_ENV: Mapping[str, str] = MappingProxyType({})
 
@@ -51,7 +56,7 @@ class Command:
         return self._spec.name
 
     def _with(self, **changes: Any) -> Command:
-        new = Command.__new__(Command)
+        new: Command = Command.__new__(Command)
         new._spec = dataclasses.replace(self._spec, **changes)
         return new
 
@@ -81,7 +86,8 @@ class Command:
 
     def arg(self, arg: Arg) -> Command:
         invariant(isinstance(arg, Arg), f"{self!r}.arg() takes an Arg, got {arg!r}")
-        return self._with(args=(*self._spec.args, arg._spec))
+        # Same-package handoff of an Arg's spec into the Command's spec tuple.
+        return self._with(args=(*self._spec.args, arg._spec))  # noqa: SLF001
 
     def args(self, args: Iterable[Arg]) -> Command:
         invariant(
@@ -98,7 +104,8 @@ class Command:
             isinstance(group, ArgGroup),
             f"{self!r}.group() takes an ArgGroup, got {group!r}",
         )
-        return self._with(groups=(*self._spec.groups, group._spec))
+        # Same-package handoff of an ArgGroup's spec into the Command's spec tuple.
+        return self._with(groups=(*self._spec.groups, group._spec))  # noqa: SLF001
 
     def subcommand(self, command: Command) -> Command:
         invariant(
@@ -118,24 +125,34 @@ class Command:
         return result
 
     def subcommand_required(self, yes: bool) -> Command:
-        return self._with(subcommand_required=_check_bool(repr(self), "subcommand_required", yes))
+        return self._with(
+            subcommand_required=_check_bool(repr(self), "subcommand_required", yes)
+        )
 
     def arg_required_else_help(self, yes: bool) -> Command:
         """With no arguments at all, print help to stderr and exit 2."""
         return self._with(
-            arg_required_else_help=_check_bool(repr(self), "arg_required_else_help", yes)
+            arg_required_else_help=_check_bool(
+                repr(self), "arg_required_else_help", yes
+            )
         )
 
     def disable_help_flag(self, yes: bool) -> Command:
-        return self._with(disable_help_flag=_check_bool(repr(self), "disable_help_flag", yes))
+        return self._with(
+            disable_help_flag=_check_bool(repr(self), "disable_help_flag", yes)
+        )
 
     def disable_version_flag(self, yes: bool) -> Command:
-        return self._with(disable_version_flag=_check_bool(repr(self), "disable_version_flag", yes))
+        return self._with(
+            disable_version_flag=_check_bool(repr(self), "disable_version_flag", yes)
+        )
 
     def disable_help_subcommand(self, yes: bool) -> Command:
         """Don't add the `help [COMMAND]...` subcommand a command with subcommands gets."""
         return self._with(
-            disable_help_subcommand=_check_bool(repr(self), "disable_help_subcommand", yes)
+            disable_help_subcommand=_check_bool(
+                repr(self), "disable_help_subcommand", yes
+            )
         )
 
     # -- use ----------------------------------------------------------------
@@ -161,14 +178,18 @@ class Command:
             "argv must be a list of str, not one str; split it first",
         )
         tokens = tuple(argv)
-        invariant(len(tokens) >= 1, "argv must start with the binary name, like sys.argv")
+        invariant(
+            len(tokens) >= 1, "argv must start with the binary name, like sys.argv"
+        )
         invariant(
             all(isinstance(token, str) for token in tokens),
             f"argv must hold str, got {tokens!r}",
         )
         return parse(build(self._spec), tokens[1:], env)
 
-    def get_matches_from(self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> ArgMatches:
+    def get_matches_from(
+        self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV
+    ) -> ArgMatches:
         """Like `try_get_matches_from`, but print the error and exit on failure."""
         result = self.try_get_matches_from(argv, env)
         if isinstance(result, Error):

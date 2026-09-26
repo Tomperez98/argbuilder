@@ -1,5 +1,7 @@
 """Help, version and error rendering, plus the process edge."""
 
+from __future__ import annotations
+
 import pytest
 
 from argbuilder import (
@@ -21,7 +23,13 @@ CMD = (
     .version("1.2.3")
     .arg(Arg("input").required(True).help("Input file"))
     .arg(Arg("extra").action("append"))
-    .arg(Arg("level").short("l").long("level").value_parser(["low", "high"]).default_value("low"))
+    .arg(
+        Arg("level")
+        .short("l")
+        .long("level")
+        .value_parser(["low", "high"])
+        .default_value("low")
+    )
     .arg(Arg("verbose").short("v").action("count").help("Be loud"))
     .arg(Arg("secret").long("secret").hide(True))
     .arg(Arg("token").long("token").env("TOKEN"))
@@ -101,7 +109,9 @@ def test_subcommand_help_lists_inherited_globals() -> None:
         (["--nope"], UnknownArgument("--nope", suggestion="--token"), 2, True),
     ],
 )
-def test_exit_contract(args: list[str], kind: ErrorKind, code: int, stderr: bool) -> None:
+def test_exit_contract(
+    args: list[str], kind: ErrorKind, code: int, stderr: bool
+) -> None:
     result = CMD.try_get_matches_from(["tool", *args])
     assert isinstance(result, Error)
     assert (result.kind, result.exit_code, result.use_stderr) == (kind, code, stderr)

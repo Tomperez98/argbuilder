@@ -1,7 +1,8 @@
 """Bugs panic: every definition or access mistake raises AssertionError at once."""
 
-from collections.abc import Callable
-from typing import Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -15,6 +16,9 @@ from argbuilder import (
     ValueParser,
     ValueValidation,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def panics(match: str) -> pytest.RaisesExc[AssertionError]:
@@ -121,9 +125,18 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         Command("x").subcommand(Command("sub").arg(Arg("a")).arg(Arg("a"))),
         "Command 'x sub': argument id 'a'",
     ),
-    (Command("x").arg(Arg("f").global_(True)), r"global_\(\) needs short\(\) or long\(\)"),
-    (Command("x").arg(Arg("f").long("f").required(True).global_(True)), "cannot be required"),
-    (Command("x").arg(Arg("h").long("hh").action("help").global_(True)), "cannot be global"),
+    (
+        Command("x").arg(Arg("f").global_(True)),
+        r"global_\(\) needs short\(\) or long\(\)",
+    ),
+    (
+        Command("x").arg(Arg("f").long("f").required(True).global_(True)),
+        "cannot be required",
+    ),
+    (
+        Command("x").arg(Arg("h").long("hh").action("help").global_(True)),
+        "cannot be global",
+    ),
     (
         Command("x")
         .arg(Arg("v").short("v").action("count").global_(True))
@@ -149,7 +162,9 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         "'--a' is used by both 'a' and 'b'",
     ),
     (
-        Command("x").subcommand(Command("add")).subcommand(Command("stage").alias("add")),
+        Command("x")
+        .subcommand(Command("add"))
+        .subcommand(Command("stage").alias("add")),
         "subcommand name 'add' is used by both 'add' and 'stage'",
     ),
     (Command("x").alias("y"), "aliases only apply to subcommands"),

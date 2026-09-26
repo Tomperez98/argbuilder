@@ -1,5 +1,7 @@
 """Terminal styling: wrap width and color, chosen at the edge, rendered purely."""
 
+from __future__ import annotations
+
 import pytest
 
 from argbuilder import (
@@ -81,7 +83,9 @@ def test_error_colors() -> None:
     error = CMD.try_get_matches_from(["tool", "in", "--levl", "x"])
     assert isinstance(error, Error)
     colored = error.render(Style(color=True))
-    assert colored.startswith("\x1b[1m\x1b[31merror:\x1b[0m unexpected argument '--levl' found")
+    assert colored.startswith(
+        "\x1b[1m\x1b[31merror:\x1b[0m unexpected argument '--levl' found"
+    )
     assert "  \x1b[32mtip:\x1b[0m a similar argument exists" in colored
     assert "\x1b[1m\x1b[4mUsage:\x1b[0m tool [OPTIONS] <INPUT>" in colored
     assert _strip_ansi(colored) == error.render()
@@ -128,7 +132,9 @@ def test_exit_styles_for_the_stream(
         (True, 0, {}, Style(color=True, width=MAX_WIDTH)),
     ],
 )
-def test_style_for(is_tty: bool, columns: int | None, env: dict[str, str], expected: Style) -> None:
+def test_style_for(
+    is_tty: bool, columns: int | None, env: dict[str, str], expected: Style
+) -> None:
     assert style_for(is_tty=is_tty, columns=columns, env=env) == expected
 
 

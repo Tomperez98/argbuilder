@@ -12,6 +12,8 @@ Bugs panic, user mistakes return values:
 `match error.kind: case InvalidValue(argument=a, value=v): ...`.
 """
 
+from __future__ import annotations
+
 from argbuilder._arg import Arg, ArgGroup
 from argbuilder._command import Command
 from argbuilder._error import (

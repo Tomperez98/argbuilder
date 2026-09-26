@@ -3,11 +3,29 @@ name = "argbuilder"
 version = "0.1.0"
 description = "Typed command-line parsing where definition bugs fail at once and user mistakes return values. No dependencies."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Tomas Perez Alvarez", email = "tomasperezalvarez@gmail.com" }
 ]
-requires-python = ">=3.14"
+keywords = ["cli", "command-line", "argument-parser", "argparse", "clap", "typed", "zero-dependency"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+requires-python = ">=3.12"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Tomperez98/argbuilder"
+Repository = "https://github.com/Tomperez98/argbuilder"
+Issues = "https://github.com/Tomperez98/argbuilder/issues"
+Changelog = "https://github.com/Tomperez98/argbuilder/releases"
 
 [dependency-groups]
 dev = [
