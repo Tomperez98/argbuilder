@@ -33,6 +33,10 @@ def test_example_git_help(git: Any, golden: Callable[[str, str], None]) -> None:
     golden("example_git_help", git.cli().render_help())
 
 
+def test_example_git_markdown(git: Any, golden: Callable[[str, str], None]) -> None:
+    golden("markdown_example_git", git.cli().render_markdown())
+
+
 def test_example_git_subcommand_help(git: Any, golden: Callable[[str, str], None]) -> None:
     result = git.cli().try_get_matches_from(["git", "help", "clone"])
     assert isinstance(result, Error)
@@ -55,6 +59,7 @@ def test_example_git_derive_help_matches_the_builder_example(git: Any, git_deriv
     derived = git_derive.Git.to_command()
     assert derived.render_help() == builder.render_help()
     assert derived.render_usage() == builder.render_usage()
+    assert derived.render_markdown() == builder.render_markdown()
 
 
 def test_example_git_derive_definition_is_valid(git_derive: Any) -> None:

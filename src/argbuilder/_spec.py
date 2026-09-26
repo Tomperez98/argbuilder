@@ -56,6 +56,7 @@ class ArgSpec:
     requires: frozenset[str] = frozenset()
     allow_hyphen_values: bool = False
     value_delimiter: str | None = None
+    last: bool = False
     hide: bool = False
     global_: bool = False
     aliases: tuple[str, ...] = ()

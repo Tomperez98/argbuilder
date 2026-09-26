@@ -172,9 +172,12 @@ class ArgMatches:
 
 
 def _checked[T](id: str, value: object, type_: type[T]) -> T:
-    if not isinstance(value, type_):
-        bug(
-            f"argument {id!r} holds {type(value).__name__}, not {type_.__name__}; "
-            f"check its value_parser()"
-        )
-    return value
+    # `isinstance` lets subclasses through on purpose (a parser may return a
+    # `PosixPath` for `Path`), but `bool` is an `int` subclass, so asking for
+    # `int` must not quietly accept a flag value.
+    if isinstance(value, type_) and not (isinstance(value, bool) and type_ not in (bool, object)):
+        return value
+    bug(
+        f"argument {id!r} holds {type(value).__name__}, not {type_.__name__}; "
+        f"check its value_parser()"
+    )

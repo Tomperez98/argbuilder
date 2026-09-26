@@ -7,6 +7,7 @@ definition bug, so each one panics.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -16,7 +17,7 @@ from argbuilder._spec import ArgAction, ArgSpec, CommandSpec, takes_values
 from argbuilder._value_parser import Invalid, ValueParser
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
 MAX_COMMAND_DEPTH = 32
 """Subcommand nesting bound. A deeper tree is a construction bug, not a real CLI."""
@@ -68,6 +69,7 @@ class ResolvedArg:
     requires: frozenset[str]
     allow_hyphen_values: bool
     value_delimiter: str | None
+    last: bool
     hide: bool
     global_: bool
     aliases: tuple[str, ...]
@@ -131,9 +133,23 @@ class ResolvedCommand:
     """How errors point at help, e.g. `'--help'`; None when help is disabled."""
 
 
+@functools.lru_cache(maxsize=256)
 def build(spec: CommandSpec) -> ResolvedCommand:
-    """Resolve the whole tree, panicking on the first definition bug."""
+    """Resolve the whole tree, panicking on the first definition bug.
+
+    Pure: the result depends only on the immutable `CommandSpec`, so the same
+    command reuses one resolved tree instead of rebuilding it on every parse
+    or render. The bound keeps a program that builds many throwaway commands
+    from retaining them all. Failures are not cached.
+    """
     return _build(spec, (), 0, ())
+
+
+def descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
+    """Every subcommand below `cmd`, depth first. Depth is bounded by the build."""
+    for sub in cmd.subcommands.values():
+        yield sub
+        yield from descendants(sub)
 
 
 def _build(
@@ -165,12 +181,28 @@ def _build(
         )
     args.extend(inherited)
     user_ids = {arg.id for arg in args}
-    if not spec.disable_help_flag and "help" not in user_ids:
+    # The automatic flags are keyed on the *action*, not the id. Keying on the
+    # id let an unrelated argument that happened to be named `help` or `version`
+    # silently delete the flag; reusing a reserved id is a definition bug.
+    has_help = any(arg.action == "help" for arg in args)
+    has_version = any(arg.action == "version" for arg in args)
+    if not spec.disable_help_flag and not has_help:
+        invariant(
+            "help" not in user_ids,
+            f"{where}: argument id 'help' is reserved for the automatic -h/--help flag; "
+            f"rename the argument, or give it action 'help' to replace the flag",
+        )
         args.append(_resolve_arg(_HELP_SPEC, where))
-    if spec.version is not None and not spec.disable_version_flag and "version" not in user_ids:
+    if spec.version is not None and not spec.disable_version_flag and not has_version:
+        invariant(
+            "version" not in user_ids,
+            f"{where}: argument id 'version' is reserved for the automatic "
+            f"-V/--version flag; rename the argument, or give it action 'version' "
+            f"to replace the flag",
+        )
         args.append(_resolve_arg(_VERSION_SPEC, where))
     invariant(
-        spec.version is not None or all(arg.action != "version" for arg in args),
+        spec.version is not None or not has_version,
         f"{where}: an argument uses action 'version' but the command has no version()",
     )
 
@@ -301,6 +333,15 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
             f"{label}: value_delimiter() is only supported on options",
         )
         invariant(
+            not spec.last or positional,
+            f"{label}: last() needs a positional argument; give it neither short() nor long()",
+        )
+        invariant(
+            not (spec.last and spec.allow_hyphen_values),
+            f"{label}: allow_hyphen_values() does nothing with last(); "
+            f"every value after '--' is already taken verbatim",
+        )
+        invariant(
             action == "append" or max_values is None or len(spec.default_values) <= max_values,
             f"{label}: {len(spec.default_values)} default values, "
             f"but num_args allows at most {max_values}",
@@ -325,6 +366,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
                 ("value_delimiter", spec.value_delimiter is not None),
                 ("allow_hyphen_values", spec.allow_hyphen_values),
                 ("value_name", spec.value_name is not None),
+                ("last", spec.last),
             )
             if is_set
         ]
@@ -360,6 +402,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
         requires=spec.requires,
         allow_hyphen_values=spec.allow_hyphen_values,
         value_delimiter=spec.value_delimiter,
+        last=spec.last,
         hide=spec.hide,
         global_=spec.global_,
         aliases=spec.aliases,
@@ -383,6 +426,16 @@ def _check_positionals(positionals: Sequence[ResolvedArg], where: str) -> None:
             f"{where}: positional {arg.id!r} takes a variable number of values, "
             f"so it must be the last positional",
         )
+    last_ids = [arg.id for arg in positionals if arg.last]
+    invariant(
+        len(last_ids) <= 1,
+        f"{where}: last(True) is set on more than one positional: {last_ids}",
+    )
+    invariant(
+        not last_ids or positionals[-1].id == last_ids[0],
+        f"{where}: last(True) positional {last_ids[0] if last_ids else ''!r} "
+        f"must be the final positional",
+    )
     optional_seen = None
     for arg in positionals:
         if optional_seen is not None:

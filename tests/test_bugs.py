@@ -11,6 +11,8 @@ from argbuilder import (
     ArgGroup,
     ArgMatches,
     Command,
+    DisplayHelp,
+    DisplayVersion,
     Error,
     InvalidValue,
     ValueParser,
@@ -58,6 +60,7 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: Arg("x").alias("--x"), r"alias\(\) takes a name without leading"),
     (lambda: Arg("x").short_alias("xy"), r"short_alias\(\) takes one character"),
     (lambda: Arg("x").global_(1), r"global_\(\) takes a bool"),  # ty: ignore[invalid-argument-type]
+    (lambda: Arg("x").last(1), r"last\(\) takes a bool"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("x").visible_alias("a b"), r"visible_alias\(\) must be"),
 ]
 
@@ -119,6 +122,14 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         "'-v' is used by both 'a' and 'b'",
     ),
     (Command("x").arg(Arg("host").short("h")), "disable_help_flag"),
+    (
+        Command("x").arg(Arg("help").long("assist")),
+        "argument id 'help' is reserved",
+    ),
+    (
+        Command("x").version("1.0").arg(Arg("version").long("ver").action("set_true")),
+        "argument id 'version' is reserved",
+    ),
     (Command("x").arg(Arg("a").required(True).default_value("1")), "is required"),
     (
         Command("x").arg(Arg("a").value_parser(int).default_value("one")),
@@ -208,6 +219,26 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         "subcommand name 'add' is used by both 'add' and 'stage'",
     ),
     (Command("x").alias("y"), "aliases only apply to subcommands"),
+    (
+        Command("x").arg(Arg("a").long("a").last(True)),
+        "last\\(\\) needs a positional argument",
+    ),
+    (
+        Command("x").arg(Arg("a").short("a").action("set_true").last(True)),
+        "last does nothing with action 'set_true'",
+    ),
+    (
+        Command("x").arg(Arg("a").last(True)).arg(Arg("b").last(True)),
+        "last\\(True\\) is set on more than one positional",
+    ),
+    (
+        Command("x").arg(Arg("a").last(True)).arg(Arg("b")),
+        "must be the final positional",
+    ),
+    (
+        Command("x").arg(Arg("a").last(True).allow_hyphen_values(True)),
+        "allow_hyphen_values\\(\\) does nothing with last\\(\\)",
+    ),
 ]
 
 
@@ -229,6 +260,21 @@ def test_depth_is_bounded() -> None:
 
 def test_freeing_the_help_short() -> None:
     Command("x").disable_help_flag(True).arg(Arg("host").short("h")).debug_assert()
+
+
+def test_a_custom_help_action_replaces_the_automatic_flag() -> None:
+    cmd = Command("x").arg(Arg("assist").long("assist").action("help"))
+    assert "--help" not in cmd.render_help()
+    result = cmd.try_get_matches_from(["x", "--assist"])
+    assert isinstance(result, Error)
+    assert result.kind == DisplayHelp()
+
+
+def test_a_custom_version_action_replaces_the_automatic_flag() -> None:
+    cmd = Command("x").version("1.0").arg(Arg("ver").long("ver").action("version"))
+    result = cmd.try_get_matches_from(["x", "--ver"])
+    assert isinstance(result, Error)
+    assert result.kind == DisplayVersion()
 
 
 # -- calling the parser wrong ---------------------------------------------------
@@ -291,6 +337,17 @@ ACCESS_BUGS: list[tuple[Callable[[ArgMatches], object], str]] = [
 def test_access_bug(read: Callable[[ArgMatches], object], message: str) -> None:
     with panics(message):
         read(matches())
+
+
+def test_a_bool_value_is_not_read_as_an_int() -> None:
+    # bool is an int subclass, so isinstance alone would let this slip through.
+    cmd = Command("x").arg(Arg("on").long("on").value_parser(bool))
+    matches = cmd.try_get_matches_from(["x", "--on", "true"])
+    assert isinstance(matches, ArgMatches)
+    with panics("holds bool, not int"):
+        matches.get_one("on", int)
+    assert matches.get_one("on", bool) is True
+    assert matches.get_one("on", object) is True
 
 
 def test_definitions_are_immutable_and_shareable() -> None:

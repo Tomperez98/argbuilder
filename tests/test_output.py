@@ -39,6 +39,10 @@ def test_help_layout(golden: Callable[[str, str], None]) -> None:
     golden("help_tool", CMD.render_help())
 
 
+def test_markdown_layout(golden: Callable[[str, str], None]) -> None:
+    golden("markdown_tool", CMD.render_markdown())
+
+
 GIT = (
     Command("git")
     .arg(Arg("verbose").short("v").action("count").global_(True).help("Be loud"))
@@ -58,6 +62,12 @@ def test_help_lists_visible_aliases_and_the_help_subcommand(
     golden: Callable[[str, str], None],
 ) -> None:
     golden("help_git", GIT.render_help())
+
+
+def test_markdown_lists_every_subcommand_as_its_own_section(
+    golden: Callable[[str, str], None],
+) -> None:
+    golden("markdown_git", GIT.render_markdown())
 
 
 def test_subcommand_help_lists_inherited_globals(
@@ -154,6 +164,22 @@ def test_get_matches_reads_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_render_usage() -> None:
     assert CMD.render_usage() == "Usage: tool [OPTIONS] <INPUT> [EXTRA]..."
+
+
+LAST_CMD = (
+    Command("wrap")
+    .about("Runs another command")
+    .arg(Arg("interpreter").required(True).help("What to run it with"))
+    .arg(Arg("args").action("append").last(True).help("Passed through untouched"))
+)
+
+
+def test_last_help_layout(golden: Callable[[str, str], None]) -> None:
+    golden("help_last", LAST_CMD.render_help())
+
+
+def test_last_markdown_layout(golden: Callable[[str, str], None]) -> None:
+    golden("markdown_last", LAST_CMD.render_markdown())
 
 
 def test_missing_subcommand_error_lists_subcommands(golden: Callable[[str, str], None]) -> None:

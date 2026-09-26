@@ -199,6 +199,17 @@ class Arg:
         )
         return self._with(value_delimiter=char)
 
+    def last(self, yes: bool) -> Arg:
+        """Only ever filled after a literal `--`; every token after it is taken verbatim.
+
+        For a positional that passes the rest of the line through unparsed,
+        like `mytool run -- cargo build --release -j8`. Must be a positional
+        (no `short()`/`long()`), and the last one; at most one per command.
+        Before `--`, an extra token is an error with a tip pointing at `--`,
+        the same as it would be with no positional left to fill.
+        """
+        return self._with(last=_check_bool(self._owner, "last", yes))
+
     def hide(self, yes: bool) -> Arg:
         """Leave the argument out of help and usage."""
         return self._with(hide=_check_bool(self._owner, "hide", yes))
