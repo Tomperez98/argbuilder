@@ -10,6 +10,7 @@ import difflib
 import functools
 from typing import TYPE_CHECKING, Any
 
+from argbuilder._build import descendants
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -34,7 +35,7 @@ from argbuilder._spec import takes_values
 from argbuilder._value_parser import Invalid, parse_boolish
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from argbuilder._build import ResolvedArg, ResolvedCommand
 
@@ -70,19 +71,20 @@ class _Parser:
         """
         self._positional_index = 0
         self._subcommand: tuple[str, ArgMatches] | None = None
+        self._escaped = False
+        """After a literal "--", every token is positional; a `last` positional opens up."""
 
     def run(self, tokens: Sequence[str]) -> ArgMatches | Error:
         cmd = self._cmd
         if cmd.arg_required_else_help and not tokens:
             return _help_error(DisplayHelpOnMissingArgumentOrSubcommand(), cmd)
         index = 0
-        escaped = False  # after "--", every token is positional
         while index < len(tokens):
             token = tokens[index]
-            if escaped:
+            if self._escaped:
                 step = self._positional(token, index)
             elif token == "--":
-                escaped = True
+                self._escaped = True
                 step = index + 1
             elif token.startswith("--"):
                 step = self._long(tokens, index)
@@ -158,6 +160,10 @@ class _Parser:
     def _positional(self, token: str, index: int) -> int | Error:
         arg = self._current_positional()
         if arg is None:
+            if self._pending_last() is not None:
+                return self._error(
+                    UnknownArgument(token), tip=f"to pass '{token}' as a value, use '-- {token}'"
+                )
             if self._cmd.subcommands:
                 closest = _closest(token, _visible_subcommand_names(self._cmd))
                 return self._error(
@@ -346,7 +352,7 @@ class _Parser:
         """A tip when `flag` is unknown here but exists on a parent or subcommand."""
         owners = [
             other
-            for other in (*reversed(self._ancestors), *_descendants(self._cmd))
+            for other in (*reversed(self._ancestors), *descendants(self._cmd))
             if _owns(other, flag)
         ]
         if not owners:
@@ -368,7 +374,21 @@ class _Parser:
     def _current_positional(self) -> ResolvedArg | None:
         positionals = self._cmd.positionals
         index = self._positional_index
-        return positionals[index] if index < len(positionals) else None
+        if index >= len(positionals):
+            return None
+        arg = positionals[index]
+        # A `last` positional only opens up after a literal "--"; before that,
+        # it isn't there to fill, so an extra token is unknown, not assigned to it.
+        return None if arg.last and not self._escaped else arg
+
+    def _pending_last(self) -> ResolvedArg | None:
+        """The `last` positional, when it's the reason `_current_positional()` is None."""
+        positionals = self._cmd.positionals
+        index = self._positional_index
+        if self._escaped or index >= len(positionals):
+            return None
+        arg = positionals[index]
+        return arg if arg.last else None
 
     def _error(self, kind: ParseFailure, tip: str | None = None) -> Error:
         return usage_error(self._cmd, kind, describe(kind), tip)
@@ -414,13 +434,6 @@ def _visible_subcommand_names(cmd: ResolvedCommand) -> list[str]:
         for name, canonical in cmd.subcommand_names.items()
         if name not in cmd.subcommands[canonical].aliases
     ]
-
-
-def _descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
-    """Every subcommand below `cmd`, depth first. Depth is bounded by the build."""
-    for sub in cmd.subcommands.values():
-        yield sub
-        yield from _descendants(sub)
 
 
 def _owns(cmd: ResolvedCommand, flag: str) -> bool:

@@ -111,6 +111,36 @@ def test_help_is_pure() -> None:
     )
 
 
+@pytest.mark.parametrize(("name", "build"), BUILDERS, ids=[name for name, _ in BUILDERS])
+def test_markdown_has_no_trailing_whitespace_and_one_final_newline(
+    name: str, build: Callable[[], Command]
+) -> None:
+    rendered = build().render_markdown()
+    assert rendered.endswith("\n")
+    assert not rendered.endswith("\n\n"), f"{name} rendered a blank trailing line"
+    assert all(line == line.rstrip() for line in rendered.splitlines()), f"{name} trailing spaces"
+
+
+def test_markdown_is_pure() -> None:
+    assert rich_command().render_markdown() == rich_command().render_markdown()
+
+
+def test_markdown_hides_hidden_arguments_and_invisible_aliases() -> None:
+    markdown = rich_command().render_markdown()
+    assert "--secret" not in markdown
+    assert "--level" in markdown
+    assert "rm" in markdown
+    assert "wipe" not in markdown
+
+
+def test_markdown_has_one_section_per_command() -> None:
+    markdown = rich_command().render_markdown()
+    assert markdown.count("\n# ") == 0  # the root heading has no leading newline
+    assert markdown.startswith("# `tool`")
+    assert "## `tool run`" in markdown
+    assert "## `tool clean`" in markdown
+
+
 def test_hidden_arguments_never_appear() -> None:
     help_text = rich_command().render_help()
     assert "--secret" not in help_text

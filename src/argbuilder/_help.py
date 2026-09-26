@@ -30,9 +30,10 @@ def value_hint(arg: ResolvedArg) -> str:
 
 
 def display_arg(arg: ResolvedArg) -> str:
-    """How errors name an argument: `--port <PORT>`, `-v`, `<FILE>...`."""
+    """How errors name an argument: `--port <PORT>`, `-v`, `<FILE>...`, `-- <ARGS>...`."""
     if arg.is_positional:
-        return f"<{arg.value_name}>{'...' if arg.is_multiple else ''}"
+        shown = f"<{arg.value_name}>{'...' if arg.is_multiple else ''}"
+        return f"-- {shown}" if arg.last else shown
     flag = f"--{arg.long}" if arg.long is not None else f"-{arg.short}"
     return f"{flag} {value_hint(arg)}" if takes_values(arg.action) else flag
 
@@ -43,7 +44,7 @@ def render_usage(cmd: ResolvedCommand) -> str:
     if any(not arg.required for arg in options):
         parts.append("[OPTIONS]")
     parts.extend(display_arg(arg) for arg in options if arg.required)
-    parts.extend(_positional_label(arg) for arg in cmd.positionals if not arg.hide)
+    parts.extend(positional_label(arg) for arg in cmd.positionals if not arg.hide)
     if cmd.subcommands:
         parts.append("<COMMAND>" if cmd.subcommand_required else "[COMMAND]")
     return " ".join(parts)
@@ -62,13 +63,15 @@ def render_help(cmd: ResolvedCommand, style: Style = PLAIN) -> str:
         lines += [*_wrap(cmd.about, style.width), ""]
     lines.append(f"{style.header('Usage:')} {render_usage(cmd)}")
     if cmd.subcommands:
-        rows = [(name, _subcommand_details(sub)) for name, sub in cmd.subcommands.items()]
+        rows = [(name, subcommand_details(sub)) for name, sub in cmd.subcommands.items()]
         lines += ["", style.header("Commands:"), *_table(rows, style)]
     visible = [arg for arg in cmd.args if not arg.hide]
-    positionals = [(_positional_label(arg), _details(arg)) for arg in visible if arg.is_positional]
+    positionals = [
+        (positional_label(arg), arg_details(arg)) for arg in visible if arg.is_positional
+    ]
     if positionals:
         lines += ["", style.header("Arguments:"), *_table(positionals, style)]
-    options = [(_option_label(arg), _details(arg)) for arg in visible if not arg.is_positional]
+    options = [(option_label(arg), arg_details(arg)) for arg in visible if not arg.is_positional]
     if options:
         lines += ["", style.header("Options:"), *_table(options, style)]
     return "\n".join(lines) + "\n"
@@ -79,12 +82,13 @@ def render_version(cmd: ResolvedCommand) -> str:
     return f"{' '.join(cmd.path)} {cmd.version}\n"
 
 
-def _positional_label(arg: ResolvedArg) -> str:
+def positional_label(arg: ResolvedArg) -> str:
     base = f"<{arg.value_name}>" if arg.required else f"[{arg.value_name}]"
-    return f"{base}{'...' if arg.is_multiple else ''}"
+    shown = f"{base}{'...' if arg.is_multiple else ''}"
+    return f"-- {shown}" if arg.last else shown
 
 
-def _option_label(arg: ResolvedArg) -> str:
+def option_label(arg: ResolvedArg) -> str:
     if arg.short is not None and arg.long is not None:
         flag = f"-{arg.short}, --{arg.long}"
     elif arg.short is not None:
@@ -96,7 +100,7 @@ def _option_label(arg: ResolvedArg) -> str:
     return f"{flag}..." if arg.action == "count" else flag
 
 
-def _details(arg: ResolvedArg) -> str:
+def arg_details(arg: ResolvedArg) -> str:
     parts = [arg.help] if arg.help else []
     if arg.defaults_raw:
         parts.append(f"[default: {', '.join(arg.defaults_raw)}]")
@@ -112,7 +116,7 @@ def _details(arg: ResolvedArg) -> str:
     return " ".join(parts)
 
 
-def _subcommand_details(sub: ResolvedCommand) -> str:
+def subcommand_details(sub: ResolvedCommand) -> str:
     parts = [sub.about] if sub.about else []
     if sub.visible_aliases:
         parts.append(f"[aliases: {', '.join(sub.visible_aliases)}]")

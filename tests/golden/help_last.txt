@@ -1,0 +1,10 @@
+Runs another command
+
+Usage: wrap [OPTIONS] <INTERPRETER> -- [ARGS]...
+
+Arguments:
+  <INTERPRETER>  What to run it with
+  -- [ARGS]...   Passed through untouched
+
+Options:
+  -h, --help  Print help

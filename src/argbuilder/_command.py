@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from argbuilder._arg import Arg, ArgGroup, _check_bool
 from argbuilder._build import build
+from argbuilder._docs import render_markdown
 from argbuilder._error import Error, ErrorKind
 from argbuilder._help import render_help, render_usage, render_version, usage_error
 from argbuilder._invariant import invariant
@@ -67,7 +68,12 @@ class Command:
         return self._with(about=text)
 
     def version(self, version: str) -> Command:
-        """Also adds `-V, --version` unless `disable_version_flag(True)`."""
+        """Also adds `-V, --version` unless `disable_version_flag(True)`.
+
+        `version` is a reserved argument id, the same as `help`: an argument
+        named `version` with any other action is a definition bug, so it can't
+        silently drop the flag.
+        """
         invariant(
             isinstance(version, str) and version != "",
             f"{self!r}.version() takes a non-empty str, got {version!r}",
@@ -193,6 +199,17 @@ class Command:
             f"{self!r}.render_help() takes a Style, got {style!r}",
         )
         return render_help(build(self._spec), style)
+
+    def render_markdown(self) -> str:
+        """Markdown documentation for this command and every subcommand below it.
+
+        One `#` section for this command, one `##` section per subcommand at
+        any depth, named by its full path. Content and visibility mirror
+        `render_help`: hidden args and hidden aliases stay out, and an
+        inherited global argument is documented again on each subcommand,
+        the same as `--help` shows it there.
+        """
+        return render_markdown(build(self._spec))
 
     def render_usage(self) -> str:
         return f"Usage: {render_usage(build(self._spec))}"

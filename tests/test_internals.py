@@ -51,3 +51,19 @@ def test_subcommand_reader_panics_on_a_name_it_never_defined() -> None:
     reader = _subcommand_reader("X.command", sub)
     with pytest.raises(AssertionError, match="matched subcommand 'ghost'"):
         reader(_GhostMatches())  # ty: ignore[invalid-argument-type]
+
+
+# -- build caching ---------------------------------------------------------------
+
+
+def test_build_is_cached_for_an_immutable_spec() -> None:
+    spec = Command("x").arg(Arg("a").long("a"))._spec  # noqa: SLF001
+    assert build(spec) is build(spec)
+
+
+def test_a_broken_spec_is_not_cached() -> None:
+    spec = Command("x").arg(Arg("a")).arg(Arg("a"))._spec  # noqa: SLF001
+    with pytest.raises(AssertionError, match="defined more than once"):
+        build(spec)
+    with pytest.raises(AssertionError, match="defined more than once"):
+        build(spec)

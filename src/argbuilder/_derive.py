@@ -105,6 +105,7 @@ class _ArgOptions:
     allow_hyphen_values: bool = False
     value_delimiter: str | None = None
     default_missing_value: str | None = None
+    last: bool = False
 
 
 _NO_OPTIONS = _ArgOptions()
@@ -133,6 +134,7 @@ def arg(
     allow_hyphen_values: bool = False,
     value_delimiter: str | None = None,
     default_missing_value: str | None = None,
+    last: bool = False,
 ) -> Any:
     """Configure one field, like clap's `#[arg(...)]`.
 
@@ -143,6 +145,8 @@ def arg(
       It must survive `str()` and the value parser: help shows `[default: 22]`.
     - `required=True` is only for `tuple[T, ...]` (at least one value); for
       other fields, `T` is required and `T | None` is optional.
+    - `last=True` needs a positional field (no `short`/`long`); it fills only
+      after a literal `--`, taking every token after it verbatim.
     """
     options = _ArgOptions(
         short=short,
@@ -165,6 +169,7 @@ def arg(
         allow_hyphen_values=allow_hyphen_values,
         value_delimiter=value_delimiter,
         default_missing_value=default_missing_value,
+        last=last,
     )
     return dataclasses.field(default=default, metadata={_METADATA_KEY: options})
 
@@ -547,6 +552,7 @@ def _value_field(
         built.global_(options.global_)
         .hide(options.hide)
         .allow_hyphen_values(options.allow_hyphen_values)
+        .last(options.last)
         .conflicts_with_all(options.conflicts_with)
     )
     for other in options.requires:

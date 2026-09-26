@@ -140,6 +140,34 @@ def test_double_dash_and_single_dash() -> None:
     assert ok(cmd, "-", "--", "-x", "--y").get_many("files", str) == ("-", "-x", "--y")
 
 
+LAST = Command("prog").arg(Arg("mode")).arg(Arg("rest").action("append").last(True))
+
+
+def test_last_is_empty_without_double_dash() -> None:
+    matches = ok(LAST, "fast")
+    assert matches.get_one("mode", str) == "fast"
+    assert matches.get_many("rest", str) == ()
+
+
+def test_last_takes_every_token_after_double_dash_verbatim() -> None:
+    matches = ok(LAST, "fast", "--", "build", "--release", "-j8")
+    assert matches.get_one("mode", str) == "fast"
+    assert matches.get_many("rest", str) == ("build", "--release", "-j8")
+
+
+def test_last_cannot_be_reached_without_double_dash() -> None:
+    error = err(LAST, "fast", "extra")
+    assert isinstance(error.kind, UnknownArgument)
+    assert error.tip == "to pass 'extra' as a value, use '-- extra'"
+
+
+def test_last_usage_and_error_naming_show_the_double_dash() -> None:
+    assert LAST.render_usage() == "Usage: prog [OPTIONS] [MODE] -- [REST]..."
+    required = Command("prog").arg(Arg("rest").action("append").required(True).last(True))
+    error = err(required)
+    assert "-- <REST>..." in error.message
+
+
 def test_unknown_argument_suggests() -> None:
     cmd = Command("prog").arg(Arg("verbose").long("verbose").action("set_true"))
     error = err(cmd, "--verbos")

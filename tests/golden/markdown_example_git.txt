@@ -1,0 +1,80 @@
+# `git`
+
+A fictional versioning CLI
+
+**Usage:** `git [OPTIONS] <COMMAND>`
+
+**Commands:**
+
+* `clone` — Clones repos
+* `push` — Pushes things
+* `add` — Adds things [aliases: stage]
+* `help` — Print this message or the help of the given subcommand(s)
+
+**Options:**
+
+* `-v, --verbose...` — More output per occurrence
+* `--color <WHEN>` — Colorize output [default: auto] [possible values: always, auto, never]
+* `-h, --help` — Print help
+* `-V, --version` — Print version
+
+## `git clone`
+
+Clones repos
+
+**Usage:** `git clone [OPTIONS] <REMOTE> [DIR]`
+
+**Arguments:**
+
+* `<REMOTE>` — The remote to clone
+* `[DIR]` — Where to clone into
+
+**Options:**
+
+* `-v, --verbose...` — More output per occurrence
+* `--color <WHEN>` — Colorize output [default: auto] [possible values: always, auto, never]
+* `-h, --help` — Print help
+
+## `git push`
+
+Pushes things
+
+**Usage:** `git push [OPTIONS] [REMOTE]`
+
+**Arguments:**
+
+* `[REMOTE]` — The remote to target
+
+**Options:**
+
+* `-p, --port <PORT>` — [default: 22] [env: GIT_PORT]
+* `-f, --force`
+* `-v, --verbose...` — More output per occurrence
+* `--color <WHEN>` — Colorize output [default: auto] [possible values: always, auto, never]
+* `-h, --help` — Print help
+
+## `git add`
+
+Adds things
+
+**Usage:** `git add [OPTIONS] <PATHS>...`
+
+**Arguments:**
+
+* `<PATHS>...`
+
+**Options:**
+
+* `-v, --verbose...` — More output per occurrence
+* `--color <WHEN>` — Colorize output [default: auto] [possible values: always, auto, never]
+* `-h, --help` — Print help
+
+## `git help`
+
+Print this message or the help of the given subcommand(s)
+
+**Usage:** `git help [COMMAND]...`
+
+**Arguments:**
+
+* `[COMMAND]...`

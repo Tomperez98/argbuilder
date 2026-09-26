@@ -215,6 +215,25 @@ assert "\x1b[" not in cli().render_help()
 print(cli().render_help(Style(color=True, width=60)))
 ```
 
+## Docs
+
+`cmd.render_markdown()` turns a `Command` into a Markdown page: one `#`
+section for the command, one `##` section per subcommand at any depth, named
+by its full path (`git remote add`). Content and visibility mirror
+`render_help` exactly — hidden args and hidden aliases stay out, an inherited
+global argument is documented again on every subcommand, the same as
+`--help` shows it there — so the two can never quietly drift apart.
+
+```python
+from pathlib import Path
+
+Path("docs/cli.md").write_text(cli().render_markdown())
+```
+
+There's no separate build step or CLI: run that wherever you'd otherwise
+regenerate docs (a script, a `pytest` golden test, a CI job) and commit the
+result.
+
 ## clap → argbuilder
 
 Coming from [clap]? The builder API maps almost one to one:
@@ -234,6 +253,7 @@ Coming from [clap]? The builder API maps almost one to one:
 | `try_get_matches_from` → `Result<ArgMatches, Error>` | `try_get_matches_from` → `ArgMatches \| Error` |
 | `Error::exit`, `ErrorKind`, `Command::error` | `Error.exit()`, `ErrorKind`, `Command.error()`, and `ArgMatches.error()` for the subcommand you're in |
 | `Arg::global(true)` | `.global_(True)` (`global` is a Python keyword). See below for how repeats work. |
+| `Arg::last(true)` | `.last(True)`: a positional filled only after a literal `--`, taking every token after it verbatim (`mytool run -- cargo build --release`). |
 | `alias`, `visible_alias`, `short_alias`, `visible_short_alias` | The same names, on `Arg` and (`alias` / `visible_alias`) on `Command`. Call once per alias. |
 | the `help` subcommand, `disable_help_subcommand` | The same: `git help`, `git help push` |
 
@@ -254,7 +274,7 @@ match result.kind:
 
 Also supported: `env`, `default_value(s)`, `default_missing_value`,
 `conflicts_with(_all)`, `requires`, `ArgGroup` (`required`, `multiple`),
-`allow_hyphen_values`, `value_delimiter`, `hide`, `arg_required_else_help`,
+`allow_hyphen_values`, `value_delimiter`, `last`, `hide`, `arg_required_else_help`,
 `disable_help_flag` / `disable_version_flag`, typo suggestions for arguments,
 subcommands and values, and a tip when an option is used at the wrong level
 (`git push -V`: "'-V' is an option of 'git'; put it before 'push'").
@@ -266,8 +286,6 @@ left to right. A `set` option given at two levels is an error ("cannot be used
 multiple times"). clap would silently keep the deeper value instead. Globals
 can't be positional or required, and their `conflicts_with` / `requires` may
 only name other globals, because every subcommand has to be able to check them.
-
-Not implemented yet: `last` / trailing var-args.
 
 ## Development
 
