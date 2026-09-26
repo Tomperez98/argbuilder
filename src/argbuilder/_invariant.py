@@ -5,13 +5,18 @@ from __future__ import annotations
 from typing import NoReturn, TypeAliasType, get_args
 
 
-def bug(message: str) -> NoReturn:
+def bug(message: str, cause: BaseException | None = None) -> NoReturn:
     """Crash: a state the contract forbids was reached.
 
     Raised explicitly rather than with `assert`, so `python -O` cannot strip
     it. Never catch this; fix the definition or call site it names.
+
+    `cause` chains the lower-level exception this panic replaces, keeping its
+    traceback available while the message stays in the library's voice.
     """
-    raise AssertionError(message)
+    if cause is None:
+        raise AssertionError(message)
+    raise AssertionError(message) from cause
 
 
 def invariant(condition: bool, message: str) -> None:

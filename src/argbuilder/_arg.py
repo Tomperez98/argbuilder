@@ -128,7 +128,7 @@ class Arg:
 
         Accepts a `ValueParser`, a callable (`int`, `float`, `Path`, ...), a
         `range`, a `Literal` of strings (best as `type Mode = Literal[...]`), or
-        a list of possible values.
+        a list or set of possible values.
         """
         return self._with(value_parser=into_value_parser(parser))
 

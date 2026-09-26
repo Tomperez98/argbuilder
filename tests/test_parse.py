@@ -326,6 +326,17 @@ def test_possible_values_error_and_tip() -> None:
     assert error.tip == "a similar value exists: 'safe'"
 
 
+def test_choices_accept_a_set_or_frozenset() -> None:
+    # A set is a natural spelling of "one of these"; help lists its members in
+    # an arbitrary order, but the set of accepted values is the same.
+    for accepted in ({"fast", "safe"}, frozenset({"fast", "safe"})):
+        parser = Arg("mode").value_parser(accepted)._spec.value_parser  # noqa: SLF001
+        assert parser is not None
+        assert sorted(parser.possible_values) == ["fast", "safe"]
+        assert parser.parse("safe") == "safe"
+        assert isinstance(parser.parse("other"), Invalid)
+
+
 def test_custom_parser_returning_invalid() -> None:
     def even(raw: str) -> int | Invalid:
         value = int(raw)

@@ -101,7 +101,10 @@ class ArgMatches:
             arg.action in ("set_true", "set_false"),
             f"get_flag({id!r}): argument uses action {arg.action!r}, not 'set_true' or 'set_false'",
         )
-        return self._checked_values(id, bool)[0]
+        values = self._checked_values(id, bool)
+        # The guard, not the message, is what matters; keep it off the hot path.
+        invariant(len(values) == 1, f"argument {id!r} did not resolve to one flag value")
+        return values[0]
 
     def get_count(self, id: str) -> int:
         arg = self._arg(id)
@@ -109,7 +112,9 @@ class ArgMatches:
             arg.action == "count",
             f"get_count({id!r}): argument uses action {arg.action!r}, not 'count'",
         )
-        return self._checked_values(id, int)[0]
+        values = self._checked_values(id, int)
+        invariant(len(values) == 1, f"argument {id!r} did not resolve to one count value")
+        return values[0]
 
     def contains_id(self, id: str) -> bool:
         """True when the argument has a value from any source, defaults included."""
@@ -178,6 +183,9 @@ class ArgMatches:
         `ArgMatches` never changes after parsing, so re-reading an `append`
         list returns the checked tuple instead of re-validating every element.
         """
+        # On the success path no message is built; the panic is tested.
+        if not isinstance(type_, type):
+            bug(f"argument {id!r}: type_ must be a type, got {type_!r}")
         cache = self._checked
         if cache is None:
             cache = self._checked = {}
