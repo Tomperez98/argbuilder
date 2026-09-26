@@ -1,0 +1,11 @@
+Usage: git [OPTIONS] [COMMAND]
+
+Commands:
+  add   Adds things [aliases: stage]
+  rm
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -v...                Be loud
+      --color <COLOR>  [aliases: --colour]
+  -h, --help           Print help

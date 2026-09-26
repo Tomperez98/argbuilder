@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -24,6 +22,7 @@ from argbuilder import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import ModuleType
 
 
@@ -193,20 +192,12 @@ def test_to_command_is_cached() -> None:
     assert Git.to_command() is Git.to_command()
 
 
-def _load_example(name: str) -> ModuleType:
-    path = Path(__file__).parent.parent / "examples" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"example_{name}", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses resolve names through it
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.mark.parametrize("sub", [[], ["clone"], ["push"], ["add"]])
-def test_derived_example_matches_the_builder_example(sub: list[str]) -> None:
-    built: Command = _load_example("git").cli()
-    derived: Command = _load_example("git_derive").Git.to_command()
+def test_derived_example_matches_the_builder_example(
+    sub: list[str], example: Callable[[str], ModuleType]
+) -> None:
+    built: Command = example("git").cli()
+    derived: Command = example("git_derive").Git.to_command()
     argv = ["git", *(["help", *sub] if sub else ["--help"])]
     built_help = built.try_get_matches_from(argv)
     derived_help = derived.try_get_matches_from(argv)

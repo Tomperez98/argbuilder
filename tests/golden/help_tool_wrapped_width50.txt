@@ -1,0 +1,14 @@
+Does things with files, carefully and at length
+
+Usage: tool [OPTIONS] <INPUT>
+
+Arguments:
+  <INPUT>  The file to read, which must already
+           exist
+
+Options:
+  -l, --level <LEVEL>  How hard to try [default:
+                       low] [possible values: low,
+                       high]
+  -q
+  -h, --help           Print help

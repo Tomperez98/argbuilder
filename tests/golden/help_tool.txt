@@ -1,0 +1,14 @@
+Does things
+
+Usage: tool [OPTIONS] <INPUT> [EXTRA]...
+
+Arguments:
+  <INPUT>     Input file
+  [EXTRA]...
+
+Options:
+  -l, --level <LEVEL>  [default: low] [possible values: low, high]
+  -v...                Be loud
+      --token <TOKEN>  [env: TOKEN]
+  -h, --help           Print help
+  -V, --version        Print version

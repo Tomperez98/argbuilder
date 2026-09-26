@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from argbuilder import (
@@ -17,6 +19,9 @@ from argbuilder import (
     ValueValidation,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 CMD = (
     Command("tool")
     .about("Does things")
@@ -30,23 +35,8 @@ CMD = (
 )
 
 
-def test_help_layout() -> None:
-    assert CMD.render_help() == (
-        "Does things\n"
-        "\n"
-        "Usage: tool [OPTIONS] <INPUT> [EXTRA]...\n"
-        "\n"
-        "Arguments:\n"
-        "  <INPUT>     Input file\n"
-        "  [EXTRA]...\n"
-        "\n"
-        "Options:\n"
-        "  -l, --level <LEVEL>  [default: low] [possible values: low, high]\n"
-        "  -v...                Be loud\n"
-        "      --token <TOKEN>  [env: TOKEN]\n"
-        "  -h, --help           Print help\n"
-        "  -V, --version        Print version\n"
-    )
+def test_help_layout(golden: Callable[[str, str], None]) -> None:
+    golden("help_tool", CMD.render_help())
 
 
 GIT = (
@@ -64,35 +54,18 @@ GIT = (
 )
 
 
-def test_help_lists_visible_aliases_and_the_help_subcommand() -> None:
-    assert GIT.render_help() == (
-        "Usage: git [OPTIONS] [COMMAND]\n"
-        "\n"
-        "Commands:\n"
-        "  add   Adds things [aliases: stage]\n"
-        "  rm\n"
-        "  help  Print this message or the help of the given subcommand(s)\n"
-        "\n"
-        "Options:\n"
-        "  -v...                Be loud\n"
-        "      --color <COLOR>  [aliases: --colour]\n"
-        "  -h, --help           Print help\n"
-    )
+def test_help_lists_visible_aliases_and_the_help_subcommand(
+    golden: Callable[[str, str], None],
+) -> None:
+    golden("help_git", GIT.render_help())
 
 
-def test_subcommand_help_lists_inherited_globals() -> None:
+def test_subcommand_help_lists_inherited_globals(
+    golden: Callable[[str, str], None],
+) -> None:
     result = GIT.try_get_matches_from(["git", "help", "add"])
     assert isinstance(result, Error)
-    assert result.render() == (
-        "Adds things\n"
-        "\n"
-        "Usage: git add [OPTIONS]\n"
-        "\n"
-        "Options:\n"
-        "  -f          [short aliases: -F]\n"
-        "  -v...       Be loud\n"
-        "  -h, --help  Print help\n"
-    )
+    golden("help_git_add", result.render())
 
 
 @pytest.mark.parametrize(
@@ -119,18 +92,10 @@ def test_version_output() -> None:
     assert CMD.render_version() == "tool 1.2.3\n"
 
 
-def test_error_layout() -> None:
+def test_error_layout(golden: Callable[[str, str], None]) -> None:
     result = CMD.try_get_matches_from(["tool", "in", "--levl", "x"])
     assert isinstance(result, Error)
-    assert result.render() == (
-        "error: unexpected argument '--levl' found\n"
-        "\n"
-        "  tip: a similar argument exists: '--level'\n"
-        "\n"
-        "Usage: tool [OPTIONS] <INPUT> [EXTRA]...\n"
-        "\n"
-        "For more information, try '--help'.\n"
-    )
+    golden("error_unknown_argument", result.render())
 
 
 def test_arg_required_else_help() -> None:
@@ -159,21 +124,15 @@ def test_user_error_uses_the_same_format() -> None:
     assert error.exit_code == 2
 
 
-def test_matches_error_uses_the_subcommand_usage() -> None:
+def test_matches_error_uses_the_subcommand_usage(golden: Callable[[str, str], None]) -> None:
     cli = Command("git").subcommand(Command("clone").arg(Arg("remote").required(True)))
     matches = cli.try_get_matches_from(["git", "clone", "x"])
     assert isinstance(matches, ArgMatches)
     sub = matches.subcommand_matches("clone")
     assert sub is not None
     error = sub.error(ValueValidation(), "remote must be a URL")
-    assert error.render() == (
-        "error: remote must be a URL\n"
-        "\n"
-        "Usage: git clone [OPTIONS] <REMOTE>\n"
-        "\n"
-        "For more information, try '--help'.\n"
-    )
     assert error.exit_code == 2
+    golden("error_subcommand_usage", error.render())
 
 
 def test_get_matches_from_exits(capsys: pytest.CaptureFixture[str]) -> None:
@@ -197,18 +156,11 @@ def test_render_usage() -> None:
     assert CMD.render_usage() == "Usage: tool [OPTIONS] <INPUT> [EXTRA]..."
 
 
-def test_missing_subcommand_error_lists_subcommands() -> None:
+def test_missing_subcommand_error_lists_subcommands(golden: Callable[[str, str], None]) -> None:
     cli = Command("git").subcommand(Command("add")).subcommand_required(True)
     result = cli.try_get_matches_from(["git"])
     assert isinstance(result, Error)
-    assert result.render() == (
-        "error: 'git' requires a subcommand but one was not provided\n"
-        "  [subcommands: add, help]\n"
-        "\n"
-        "Usage: git [OPTIONS] <COMMAND>\n"
-        "\n"
-        "For more information, try '--help'.\n"
-    )
+    golden("error_missing_subcommand", result.render())
 
 
 def test_error_without_a_usage_or_help_hint() -> None:
