@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from argbuilder._invariant import bug
+from argbuilder._suggest import suggest
 
 if TYPE_CHECKING:
     from argbuilder._value_parser import ValueParser
@@ -28,10 +29,8 @@ def check_action(owner: str, value: object) -> ArgAction:
     for action in ARG_ACTIONS:
         if value == action:
             return action
-    import difflib
-
-    close = difflib.get_close_matches(str(value).lower(), ARG_ACTIONS, n=1)
-    hint = f"; did you mean {close[0]!r}?" if close else ""
+    close = suggest(str(value).lower(), ARG_ACTIONS)
+    hint = f"; did you mean {close!r}?" if close else ""
     bug(f"{owner}.action() takes one of {', '.join(ARG_ACTIONS)}, got {value!r}{hint}")
 
 

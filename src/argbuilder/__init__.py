@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from argbuilder._arg import Arg, ArgGroup
 from argbuilder._command import Command
-from argbuilder._derive import Args, FieldAction, Parser, arg
+from argbuilder._derive import Args, Parser, arg
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -37,6 +37,7 @@ from argbuilder._error import (
     UnknownArgument,
     ValueValidation,
 )
+from argbuilder._field import FieldAction
 from argbuilder._matches import ArgMatches, ValueSource
 from argbuilder._spec import ArgAction
 from argbuilder._style import Style

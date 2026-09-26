@@ -338,7 +338,7 @@ def test_two_subcommand_fields_panic() -> None:
 
 # -- remaining derive paths -----------------------------------------------------
 
-from argbuilder._derive import _check_type  # noqa: E402
+from argbuilder._field import _check_type  # noqa: E402
 
 
 class Aliased(Parser, aliases=["al", "als"]):
@@ -439,14 +439,12 @@ def test_parse_reads_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Git.parse().command == RemoteAdd(name="x")
 
 
-def test_unresolvable_annotation_panics_with_a_note() -> None:
+def test_unresolvable_annotation_panics() -> None:
     namespace: dict[str, object] = {}
     exec("class Bad(Parser):\n    x: MissingName\n", globals(), namespace)  # noqa: S102
     bad = namespace["Bad"]
-    with pytest.raises(NameError) as caught:
+    with pytest.raises(AssertionError, match="must be defined at module level"):
         bad.to_command()  # ty: ignore[unresolved-attribute]
-    notes = " ".join(getattr(caught.value, "__notes__", []))
-    assert "must be defined at module level" in notes
 
 
 def test_check_type_without_an_explicit_parser_panics() -> None:

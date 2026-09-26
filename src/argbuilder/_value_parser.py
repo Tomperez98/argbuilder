@@ -149,7 +149,13 @@ class ValueParser[T]:
 
 
 type ValueParserLike = (
-    ValueParser[Any] | Callable[[str], Any] | Sequence[str] | range | TypeAliasType
+    ValueParser[Any]
+    | Callable[[str], Any]
+    | Sequence[str]
+    | set[str]
+    | frozenset[str]
+    | range
+    | TypeAliasType
 )
 """What `Arg.value_parser()` accepts, like clap's `impl Into<ValueParser>`."""
 
@@ -168,6 +174,8 @@ def into_value_parser(like: object) -> ValueParser[Any]:
             f"value_parser({like!r}): a str is ambiguous; "
             f"pass a list of possible values like [{like!r}]",
         )
+    if isinstance(like, (set, frozenset)):
+        return ValueParser.choices(*like)
     if like is bool:
         return ValueParser.boolean()
     if like is int:
@@ -176,9 +184,12 @@ def into_value_parser(like: object) -> ValueParser[Any]:
         return ValueParser.floating()
     if callable(like):
         return ValueParser.from_fn(like)
-    if isinstance(like, Sequence):
+    if isinstance(like, Sequence) and not isinstance(like, bytes):
         return ValueParser.choices(*like)
-    bug(f"value_parser({like!r}): expected a ValueParser, callable, range, Literal, or list of str")
+    bug(
+        f"value_parser({like!r}): expected a ValueParser, callable, range, Literal, "
+        f"or list/set of str",
+    )
 
 
 _MAX_ALIAS_DEPTH = 16

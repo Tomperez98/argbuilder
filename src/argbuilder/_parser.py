@@ -31,6 +31,7 @@ from argbuilder._help import display_arg, render_help, render_version, usage_err
 from argbuilder._invariant import bug, invariant
 from argbuilder._matches import ArgMatches, MatchedArg
 from argbuilder._spec import takes_values
+from argbuilder._suggest import suggest
 from argbuilder._value_parser import Invalid, parse_boolish
 
 if TYPE_CHECKING:
@@ -168,7 +169,7 @@ class _Parser:
                     tip=f"to pass '{token}' as a value, use '-- {token}'",
                 )
             if self._cmd.subcommands:
-                closest = _closest(token, _visible_subcommand_names(self._cmd))
+                closest = suggest(token, _visible_subcommand_names(self._cmd))
                 return self._error(
                     InvalidSubcommand(token, closest),
                     tip=_similar_tip("subcommand", closest),
@@ -188,7 +189,7 @@ class _Parser:
         current = self._current_positional()
         if current is not None and current.allow_hyphen_values:
             return self._positional(token, index)
-        closest = _closest(token, candidates)
+        closest = suggest(token, candidates)
         tip = (
             self._defined_elsewhere(flag)
             or _similar_tip("argument", closest)
@@ -281,7 +282,7 @@ class _Parser:
                 continue
             shown = display_arg(arg)
             if parser.possible_values:
-                closest = _closest(raw, list(parser.possible_values))
+                closest = suggest(raw, parser.possible_values)
                 kind = InvalidValue(shown, raw, value.message, parser.possible_values, closest, env)
                 return self._error(kind, tip=_similar_tip("value", closest))
             return self._error(InvalidValue(shown, raw, value.message, env=env))
@@ -430,7 +431,7 @@ def _help_for(cmd: ResolvedCommand, names: Sequence[str]) -> Error:
     for name in names:
         canonical = target.subcommand_names.get(name)
         if canonical is None:
-            closest = _closest(name, _visible_subcommand_names(target))
+            closest = suggest(name, _visible_subcommand_names(target))
             kind = InvalidSubcommand(name, closest)
             return usage_error(target, kind, describe(kind), _similar_tip("subcommand", closest))
         target = target.subcommands[canonical]
@@ -450,13 +451,6 @@ def _owns(cmd: ResolvedCommand, flag: str) -> bool:
     arg = cmd.by_long.get(flag[2:]) if flag.startswith("--") else cmd.by_short.get(flag[1:])
     # An inherited global belongs to the ancestor that defined it, which is listed already.
     return arg is not None and not arg.hide and arg.id not in cmd.inherited
-
-
-def _closest(typed: str, candidates: list[str]) -> str | None:
-    import difflib
-
-    matches = difflib.get_close_matches(typed, candidates, n=1)
-    return matches[0] if matches else None
 
 
 def _similar_tip(what: str, closest: str | None) -> str | None:

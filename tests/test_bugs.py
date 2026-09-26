@@ -388,6 +388,8 @@ def matches() -> ArgMatches:
 ACCESS_BUGS: list[tuple[Callable[[ArgMatches], object], str]] = [
     (lambda m: m.get_one("nmae", str), "unknown argument id 'nmae'"),
     (lambda m: m.get_one("name", int), "holds str, not int"),
+    (lambda m: m.get_one("name", "str"), "type_ must be a type"),  # ty: ignore[invalid-argument-type]
+    (lambda m: m.get_required("name", "str"), "type_ must be a type"),  # ty: ignore[invalid-argument-type]
     (lambda m: m.get_one("tags", str), "use get_many"),
     (lambda m: m.get_one("force", bool), "use get_flag"),
     (lambda m: m.get_many("v", int), "use get_count"),
