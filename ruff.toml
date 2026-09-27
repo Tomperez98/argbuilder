@@ -42,4 +42,4 @@ combine-as-imports = true
 required-imports = ["from __future__ import annotations"]
 
 [lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["argbuilder.Parser", "argbuilder.Args"]
+runtime-evaluated-decorators = ["argbuilder.parser", "argbuilder.args"]

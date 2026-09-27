@@ -10,15 +10,20 @@ import pytest
 
 from argbuilder import (
     Arg,
-    Args,
     ArgumentConflict,
     Command,
     Error,
     InvalidValue,
     MissingRequiredArgument,
     MissingSubcommand,
-    Parser,
     arg,
+    args,
+    from_arg_matches,
+    parse,
+    parse_from,
+    parser as parser_deco,
+    to_command,
+    try_parse_from,
 )
 
 if TYPE_CHECKING:
@@ -33,7 +38,8 @@ def panics(match: str) -> pytest.RaisesExc[AssertionError]:
 type Mode = Literal["fast", "safe"]
 
 
-class Tool(Parser, name="tool", version="0.1.0"):
+@parser_deco(name="tool", version="0.1.0")
+class Tool:
     """Does things.
 
     More detail that stays out of `about`.
@@ -51,20 +57,20 @@ class Tool(Parser, name="tool", version="0.1.0"):
     ratio: float = arg(long=True, default=0.5)
 
 
-def parse[T: Parser](cls: type[T], *argv: str, env: dict[str, str] | None = None) -> T:
-    result = cls.try_parse_from([cls.to_command().get_name(), *argv], env or {})
+def parse_ok[T](cls: type[T], *argv: str, env: dict[str, str] | None = None) -> T:
+    result = try_parse_from(cls, [to_command(cls).get_name(), *argv], env or {})
     assert not isinstance(result, Error), result.render()
     return result
 
 
-def fail(cls: type[Parser], *argv: str) -> Error:
-    result = cls.try_parse_from([cls.to_command().get_name(), *argv])
+def fail(cls: type, *argv: str) -> Error:
+    result = try_parse_from(cls, [to_command(cls).get_name(), *argv])
     assert isinstance(result, Error), result
     return result
 
 
 def test_defaults_and_absent_values() -> None:
-    assert parse(Tool, "in.txt") == Tool(
+    assert parse_ok(Tool, "in.txt") == Tool(
         input=Path("in.txt"),
         extra=(),
         output=None,
@@ -79,7 +85,7 @@ def test_defaults_and_absent_values() -> None:
 
 
 def test_every_field_kind() -> None:
-    tool = parse(
+    tool = parse_ok(
         Tool,
         *("in.txt", "a", "b", "-o", "out.txt", "--level", "7", "--mode", "fast"),
         *("--dry-run", "--no-cleanup", "-vv", "-t", "x", "--tag", "y", "--ratio", "2"),
@@ -93,11 +99,11 @@ def test_every_field_kind() -> None:
 
 
 def test_env_true_reads_the_uppercased_field_name() -> None:
-    assert parse(Tool, "in", env={"LEVEL": "9"}).level == 9
+    assert parse_ok(Tool, "in", env={"LEVEL": "9"}).level == 9
 
 
 def test_instances_are_frozen() -> None:
-    tool = parse(Tool, "in")
+    tool = parse_ok(Tool, "in")
     with pytest.raises(dataclasses.FrozenInstanceError):
         tool.level = 1  # ty: ignore[invalid-assignment]
 
@@ -110,7 +116,7 @@ def test_user_mistakes_are_error_values() -> None:
 
 
 def test_help_is_derived() -> None:
-    assert Tool.to_command().render_help() == (
+    assert to_command(Tool).render_help() == (
         "Does things\n"
         "\n"
         "Usage: tool [OPTIONS] <INPUT> [EXTRA]...\n"
@@ -134,62 +140,67 @@ def test_help_is_derived() -> None:
 
 
 def test_debug_assert() -> None:
-    Tool.to_command().debug_assert()
+    to_command(Tool).debug_assert()
 
 
 # -- subcommands ----------------------------------------------------------------
 
 
-class Shared(Args):
+@args
+class Shared:
     json: bool = arg(long=True)
 
 
-class Git(Parser):
+@parser_deco
+class Git:
     verbose: int = arg(short=True, action="count", global_=True)
     command: Clone | RemoteAdd
 
 
-class Clone(Parser, visible_aliases=["cl"]):
+@parser_deco(visible_aliases=["cl"])
+class Clone:
     """Clones."""
 
     remote: str
     shared: Shared
 
 
-class RemoteAdd(Parser):
+@parser_deco
+class RemoteAdd:
     name: str
 
 
-class Maybe(Parser):
+@parser_deco
+class Maybe:
     command: Clone | None = None
 
 
 def test_subcommand_is_an_instance_of_its_class() -> None:
-    git = parse(Git, "-v", "clone", "origin", "--json", "-v")
+    git = parse_ok(Git, "-v", "clone", "origin", "--json", "-v")
     assert git == Git(verbose=2, command=Clone(remote="origin", shared=Shared(json=True)))
 
 
 def test_subcommand_names_are_kebab_case_with_aliases() -> None:
-    assert parse(Git, "remote-add", "x").command == RemoteAdd(name="x")
-    assert isinstance(parse(Git, "cl", "x").command, Clone)
+    assert parse_ok(Git, "remote-add", "x").command == RemoteAdd(name="x")
+    assert isinstance(parse_ok(Git, "cl", "x").command, Clone)
 
 
 def test_union_subcommand_is_required_and_none_makes_it_optional() -> None:
     assert isinstance(fail(Git).kind, MissingSubcommand)
-    assert parse(Maybe).command is None
-    assert parse(Maybe, "clone", "x").command == Clone(remote="x", shared=Shared(json=False))
+    assert parse_ok(Maybe).command is None
+    assert parse_ok(Maybe, "clone", "x").command == Clone(remote="x", shared=Shared(json=False))
 
 
 def test_from_arg_matches_reads_an_extended_command() -> None:
-    cmd = Git.to_command().arg(Arg("extra").long("extra").action("set_true"))
+    cmd = to_command(Git).arg(Arg("extra").long("extra").action("set_true"))
     matches = cmd.try_get_matches_from(["git", "--extra", "remote-add", "x"])
     assert not isinstance(matches, Error)
     assert matches.get_flag("extra")
-    assert Git.from_arg_matches(matches) == Git(verbose=0, command=RemoteAdd(name="x"))
+    assert from_arg_matches(Git, matches) == Git(verbose=0, command=RemoteAdd(name="x"))
 
 
 def test_to_command_is_cached() -> None:
-    assert Git.to_command() is Git.to_command()
+    assert to_command(Git) is to_command(Git)
 
 
 @pytest.mark.parametrize("sub", [[], ["clone"], ["push"], ["add"]])
@@ -198,7 +209,8 @@ def test_derived_example_matches_the_builder_example(
     example: Callable[[str], ModuleType],
 ) -> None:
     built: Command = example("git").cli()
-    derived: Command = example("git_derive").Git.to_command()
+    derived_module = example("git_derive")
+    derived: Command = derived_module.to_command(derived_module.Git)
     argv = ["git", *(["help", *sub] if sub else ["--help"])]
     built_help = built.try_get_matches_from(argv)
     derived_help = derived.try_get_matches_from(argv)
@@ -209,82 +221,100 @@ def test_derived_example_matches_the_builder_example(
 # -- definition bugs ------------------------------------------------------------
 
 
-class Cycle(Parser):
+@parser_deco
+class Cycle:
     command: Cycle
 
 
-class Flat(Args):
+@args
+class Flat:
     again: Flat
 
 
-class HoldsFlat(Parser):
+@parser_deco
+class HoldsFlat:
     flat: Flat
 
 
-class Holder(Args):
+@args
+class Holder:
     command: Clone
 
 
-class HoldsHolder(Parser):
+@parser_deco
+class HoldsHolder:
     holder: Holder
 
 
-class Dupe(Parser, name="clone"):
+@parser_deco(name="clone")
+class Dupe:
     pass
 
 
-class DuplicateNames(Parser):
+@parser_deco
+class DuplicateNames:
     command: Clone | Dupe
 
 
 def test_subcommand_cycle_panics() -> None:
     with panics("subcommands form a cycle: Cycle -> Cycle"):
-        Cycle.to_command()
+        to_command(Cycle)
 
 
 def test_flatten_cycle_panics() -> None:
-    with panics("flattened Args form a cycle"):
-        HoldsFlat.to_command()
+    with panics("flattened @args form a cycle"):
+        to_command(HoldsFlat)
 
 
 def test_args_cannot_hold_a_subcommand() -> None:
-    with panics("an Args class cannot hold a subcommand"):
-        HoldsHolder.to_command()
+    with panics("an @args class cannot hold a subcommand"):
+        to_command(HoldsHolder)
 
 
 def test_duplicate_subcommand_names_panic() -> None:
     with panics("are both named 'clone'"):
-        DuplicateNames.to_command()
+        to_command(DuplicateNames)
 
 
-def test_field_hiding_a_method_panics_at_the_class_statement() -> None:
-    with panics(r"field 'parse' would hide Parser.parse\(\)"):
+def test_a_class_cannot_be_decorated_with_both_parser_and_args() -> None:
+    with panics("decorate with exactly one of @parser or @args"):
 
-        class Bad(Parser):
-            parse: bool = arg(long=True)
+        @args
+        @parser_deco
+        class BadBoth:
+            pass
+
+    with panics("decorate with exactly one of @parser or @args"):
+
+        @parser_deco
+        @args
+        class BadBothOther:
+            pass
 
 
-def test_bad_class_option_panics_at_the_class_statement() -> None:
+def test_bad_class_option_panics_at_decoration() -> None:
     with panics("Command name must be a non-empty str"):
 
-        class Bad(Parser, name="has space"):
+        @parser_deco(name="has space")
+        class Bad:
             pass
 
 
 def test_default_factory_panics() -> None:
     with panics("default_factory is not supported"):
 
-        class Bad(Parser):
+        @parser_deco
+        class Bad:
             tags: tuple[str, ...] = dataclasses.field(default_factory=tuple)
 
 
-def _bad_field(annotation: str, default: str = "") -> type[Parser]:
-    """A one-field Parser, defined at module scope so its annotation resolves."""
+def _bad_field(annotation: str, default: str = "") -> type:
+    """A one-field @parser class, defined at module scope so its annotation resolves."""
     namespace: dict[str, object] = {}
-    source = f"class Bad(Parser):\n    x: {annotation}{f' = {default}' if default else ''}\n"
+    source = f"@parser_deco\nclass Bad:\n    x: {annotation}{f' = {default}' if default else ''}\n"
     exec(source, globals(), namespace)  # noqa: S102
     bad = namespace["Bad"]
-    assert isinstance(bad, type) and issubclass(bad, Parser)
+    assert isinstance(bad, type)
     return bad
 
 
@@ -293,7 +323,7 @@ FIELD_BUGS: list[tuple[str, str, str]] = [
     ("tuple[str, str]", "", "a fixed-size tuple is not supported"),
     ("tuple[str, ...] | None", "", "drop '| None'"),
     ("int | str", "", "a union of"),
-    ("Clone | int", "", "a union of Parser classes"),
+    ("Clone | int", "", "a union of @parser classes"),
     ("bool", "arg(long=True, default=True)", "use arg\\(action='set_false'\\)"),
     ("bool | None", "arg(long=True)", "action 'set_true' needs a 'bool' field"),
     ("str", "arg(long=True, action='count')", "action 'count' needs an 'int' field"),
@@ -317,23 +347,23 @@ FIELD_BUGS: list[tuple[str, str, str]] = [
 def test_field_bugs_panic_naming_the_field(annotation: str, default: str, message: str) -> None:
     bad = _bad_field(annotation, default)
     with panics(message) as caught:
-        bad.to_command()
+        to_command(bad)
     assert "Bad.x" in f"{caught.value} {getattr(caught.value, '__notes__', [])}"
 
 
 def test_bool_positional_panics_at_build() -> None:
     with panics("action 'set_true' needs short\\(\\) or long\\(\\)"):
-        _bad_field("bool").to_command().debug_assert()
+        to_command(_bad_field("bool")).debug_assert()
 
 
 def test_two_subcommand_fields_panic() -> None:
     namespace: dict[str, object] = {}
-    source = "class Bad(Parser):\n    a: Clone\n    b: RemoteAdd\n"
+    source = "@parser_deco\nclass Bad:\n    a: Clone\n    b: RemoteAdd\n"
     exec(source, globals(), namespace)  # noqa: S102
     bad = namespace["Bad"]
-    assert isinstance(bad, type) and issubclass(bad, Parser)
+    assert isinstance(bad, type)
     with panics("already has subcommand field 'a'"):
-        bad.to_command()
+        to_command(bad)
 
 
 # -- remaining derive paths -----------------------------------------------------
@@ -341,15 +371,18 @@ def test_two_subcommand_fields_panic() -> None:
 from argbuilder._field import _check_type  # noqa: E402
 
 
-class Aliased(Parser, aliases=["al", "als"]):
+@parser_deco(aliases=["al", "als"])
+class Aliased:
     pass
 
 
-class HasAliased(Parser):
+@parser_deco
+class HasAliased:
     command: Aliased
 
 
-class Configured(Parser):
+@parser_deco
+class Configured:
     point: tuple[int, ...] = arg(long=True, num_args=(2, 2), value_parser=int, default=(1, 2))
     single: tuple[str, ...] = arg(long=True, num_args=1, default=("a",))
     empty: tuple[str, ...] = arg(long=True, default=())
@@ -368,7 +401,7 @@ class Configured(Parser):
 
 
 def test_class_level_aliases_are_registered() -> None:
-    assert isinstance(parse(HasAliased, "als").command, Aliased)
+    assert isinstance(parse_ok(HasAliased, "als").command, Aliased)
 
 
 CONFIGURED_ARGV = [
@@ -387,21 +420,22 @@ CONFIGURED_ARGV = [
 
 
 def test_configured_fields_build() -> None:
-    cmd = Configured.to_command()
+    cmd = to_command(Configured)
     cmd.debug_assert()
-    matches = Configured.try_parse_from(CONFIGURED_ARGV)
+    matches = try_parse_from(Configured, CONFIGURED_ARGV)
     assert isinstance(matches, Configured)
     assert (matches.point, matches.single, matches.empty) == ((3, 4), ("z",), ())
     assert matches.color == "auto"
     assert matches.on is False
     assert matches.mapping == {"ab": 2}
-    tagged = Configured.try_parse_from([*CONFIGURED_ARGV, "--tags", "a,b"])
+    tagged = try_parse_from(Configured, [*CONFIGURED_ARGV, "--tags", "a,b"])
     assert isinstance(tagged, Configured) and tagged.tags == ("a", "b")
-    colored = Configured.try_parse_from([*CONFIGURED_ARGV, "--color"])
+    colored = try_parse_from(Configured, [*CONFIGURED_ARGV, "--color"])
     assert isinstance(colored, Configured) and colored.color == "always"
 
 
-class Wired(Parser):
+@parser_deco
+class Wired:
     """Every arg() option the other fixtures do not name."""
 
     hidden: str | None = arg(long=True, hide=True)
@@ -416,35 +450,35 @@ def test_configured_fields_wire_every_builder_option() -> None:
     # Each option must survive `arg()` -> `_ArgOptions` -> the builder chain,
     # and `hide`, `aliases`, `conflicts_with`, `requires`, `allow_hyphen_values`
     # and `last` must reach parse behavior, not just the metadata.
-    cmd = Wired.to_command()
+    cmd = to_command(Wired)
     cmd.debug_assert()
     help_text = cmd.render_help()
     assert "--hidden" not in help_text
     assert "--named <THING>" in help_text
-    parsed = parse(Wired, "--n", "v", "--", "a", "b")
+    parsed = parse_ok(Wired, "--n", "v", "--", "a", "b")
     assert (parsed.named, parsed.rest) == ("v", ("a", "b"))
-    assert parse(Wired, "--hyphen", "-5").hyphen == "-5"
+    assert parse_ok(Wired, "--hyphen", "-5").hyphen == "-5"
     assert isinstance(fail(Wired, "--hyphen", "x", "--toggle").kind, ArgumentConflict)
     assert isinstance(fail(Wired, "--needs", "y").kind, MissingRequiredArgument)
 
 
 def test_parse_from_exits_on_error() -> None:
     with pytest.raises(SystemExit) as exited:
-        Git.parse_from(["git"])
+        parse_from(Git, ["git"])
     assert exited.value.code == 2
 
 
 def test_parse_reads_the_process(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.argv", ["git", "remote-add", "x"])
-    assert Git.parse().command == RemoteAdd(name="x")
+    assert parse(Git).command == RemoteAdd(name="x")
 
 
 def test_unresolvable_annotation_panics() -> None:
     namespace: dict[str, object] = {}
-    exec("class Bad(Parser):\n    x: MissingName\n", globals(), namespace)  # noqa: S102
+    exec("@parser_deco\nclass Bad:\n    x: MissingName\n", globals(), namespace)  # noqa: S102
     bad = namespace["Bad"]
     with pytest.raises(AssertionError, match="must be defined at module level"):
-        bad.to_command()  # ty: ignore[unresolved-attribute]
+        to_command(bad)  # ty: ignore[invalid-argument-type]
 
 
 def test_check_type_without_an_explicit_parser_panics() -> None:
@@ -453,7 +487,8 @@ def test_check_type_without_an_explicit_parser_panics() -> None:
     assert _check_type("Bad.x", dict[str, int], explicit=True) is object
 
 
-class TypingOptional(Parser):
+@parser_deco
+class TypingOptional:
     # `typing.Optional` / `typing.Union` resolve to `typing.Union` at runtime,
     # while `X | None` resolves to `types.UnionType`: two distinct code paths,
     # both of which must produce an optional field.
@@ -461,34 +496,37 @@ class TypingOptional(Parser):
     label: Union[str, None] = arg(long=True)  # noqa: UP007
 
 
-class HTTPServer(Parser):
+@parser_deco
+class HTTPServer:
     pass
 
 
-class MultiSentence(Parser):
+@parser_deco
+class MultiSentence:
     """Does one thing. And then another."""
 
 
 def test_typing_optional_and_union_are_optional_fields() -> None:
-    assert parse(TypingOptional) == TypingOptional(count=None, label=None)
-    parsed = parse(TypingOptional, "--count", "3", "--label", "x")
+    assert parse_ok(TypingOptional) == TypingOptional(count=None, label=None)
+    parsed = parse_ok(TypingOptional, "--count", "3", "--label", "x")
     assert (parsed.count, parsed.label) == (3, "x")
 
 
 def test_kebab_case_handles_acronyms() -> None:
-    assert HTTPServer.to_command().get_name() == "http-server"
+    assert to_command(HTTPServer).get_name() == "http-server"
 
 
 def test_about_keeps_the_period_of_a_multi_sentence_docstring() -> None:
     # A lone trailing period is dropped, but a docstring with a sentence break
     # keeps it (`_about` must not truncate the second sentence).
-    assert (
-        MultiSentence.to_command().render_help().startswith("Does one thing. And then another.\n")
-    )
+    assert to_command(MultiSentence).render_help().startswith("Does one thing. And then another.\n")
 
 
-def test_parser_base_methods_panic() -> None:
-    with panics("call it on a subclass"):
-        Parser.to_command()
-    with panics("call it on a subclass"):
-        Parser.from_arg_matches(None)  # ty: ignore[invalid-argument-type]
+def test_undecorated_class_panics_on_the_entry_points() -> None:
+    class Bad:
+        pass
+
+    with panics(r"to_command\(\): .* is not decorated with @parser"):
+        to_command(Bad)
+    with panics(r"from_arg_matches\(\): .* is not decorated with @parser"):
+        from_arg_matches(Bad, None)  # ty: ignore[invalid-argument-type]

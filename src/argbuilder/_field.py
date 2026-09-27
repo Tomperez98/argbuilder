@@ -3,7 +3,7 @@
 The pure half of the derive layer: option configuration (`arg()` and the
 applier table), annotation introspection, and the reader descriptors that
 say how a field is pulled out of `ArgMatches`. It knows nothing about
-`Parser`/`Args`, so it can be tested without parsing or building a command.
+`@parser`/`@args`, so it can be tested without parsing or building a command.
 """
 
 from __future__ import annotations
@@ -419,7 +419,3 @@ def _split_optional(hint: object) -> tuple[bool, tuple[object, ...]]:
         present = tuple(member for member in members if member is not NoneType)
         return len(present) < len(members), present
     return False, (hint,)
-
-
-def _is_class(value: object, base: type) -> bool:
-    return isinstance(value, type) and issubclass(value, base)

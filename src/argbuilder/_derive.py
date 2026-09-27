@@ -1,35 +1,52 @@
 """Derive a `Command` from a class: the clap derive model on top of the builders.
 
 ```python
-class Git(Parser, version="1.0.0"):
+@parser(version="1.0.0")
+class Git:
     \"\"\"A fictional versioning CLI.\"\"\"
 
     verbose: int = arg(short=True, long=True, action="count", global_=True)
     command: Clone | Push
 
 
-class Clone(Parser):
+@parser
+class Clone:
     \"\"\"Clones repos.\"\"\"
 
     remote: str
 
 
-class Push(Parser):
+@parser
+class Push:
     \"\"\"Pushes things.\"\"\"
 
     port: int = arg(short=True, long=True, default=22)
     force: bool = arg(short=True, long=True)
+
+
+git = parse(Git)  # or try_parse_from(Git, argv, env) -> Git | Error
+match git.command:
+    case Push(port=port, force=force):
+        ...
+    case Clone(remote=remote):
+        ...
 ```
 
-A subclass is a frozen, keyword-only dataclass. The type of each field picks
-the action, as in clap: `bool` is a flag, `T` is required, `T | None` is
-optional, `tuple[T, ...]` collects every value, a union of `Parser` classes
-is the subcommand, and an `Args` class is flattened in. The derive only
-*describes* a `Command`, so parsing, help and errors are the builder's.
+`@parser` turns a class into a frozen, keyword-only dataclass plus a command
+description, like clap's `#[derive(Parser)]`; `@args` does the same for a
+reusable group of fields flattened into every command that has a field of
+its type, like `#[command(flatten)]`. The type of each field picks the
+action, as in clap: `bool` is a flag, `T` is required, `T | None` is
+optional, `tuple[T, ...]` collects every value, a union of `@parser` classes
+is the subcommand, and an `@args` class is flattened in. The decorator only
+*describes* a `Command`, so parsing, help and errors are the builder's,
+reached through the module-level `to_command`, `parse`, `parse_from`,
+`try_parse_from` and `from_arg_matches` functions rather than methods, so a
+field can be named anything without hiding one.
 
-Definition bugs panic: at the class statement for class options, at the
-first `to_command()` / parse for fields (annotations can name classes defined
-later in the module).
+Definition bugs panic: when the decorator runs, for class options; at the
+first `to_command()` / parse, for fields (annotations can name classes
+defined later in the module).
 """
 
 from __future__ import annotations
@@ -41,7 +58,7 @@ import sys
 import weakref
 from dataclasses import MISSING, dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast, dataclass_transform, get_type_hints
+from typing import TYPE_CHECKING, cast, dataclass_transform, get_type_hints, overload
 
 from argbuilder._command import Command
 from argbuilder._error import Error
@@ -50,7 +67,6 @@ from argbuilder._field import (
     _NO_OPTIONS,
     FlagReader,
     ValueReader,
-    _is_class,
     _names,
     _split_optional,
     _value_field,
@@ -60,7 +76,7 @@ from argbuilder._invariant import bug, invariant
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
-    from typing import Any, Self
+    from typing import Any
 
     from argbuilder._arg import Arg
     from argbuilder._field import _ArgOptions
@@ -69,74 +85,94 @@ if TYPE_CHECKING:
 _NO_ENV: Mapping[str, str] = MappingProxyType({})
 
 
+# -- decorators -----------------------------------------------------------------
+
+
+@overload
+def args[T](cls: type[T], /) -> type[T]: ...
+@overload
+def args[T]() -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(kw_only_default=True, frozen_default=True, field_specifiers=(arg,))
-class Args:
+def args(cls: type | None = None, /) -> Any:
     """A reusable set of fields, flattened into every command that has a field of its type.
 
     ```python
-    class Output(Args):
+    @args
+    class Output:
         json: bool = arg(long=True)
 
 
-    class Status(Parser):
+    @parser
+    class Status:
         output: Output
     ```
 
-    Like clap's `#[command(flatten)]`. It cannot hold a subcommand.
+    Like clap's `#[command(flatten)]`. It cannot hold a subcommand. Usable
+    as `@args` or `@args()`.
     """
 
-    def __init_subclass__(cls) -> None:
-        super().__init_subclass__()
+    def decorate(cls: type) -> type:
         invariant(
-            not issubclass(cls, Parser),
-            f"{cls.__qualname__}: subclass Parser or Args, not both",
+            cls not in _HEADS,
+            f"{cls.__qualname__}: decorate with exactly one of @parser or @args",
         )
         _make_dataclass(cls)
+        _ARGS_CLASSES.add(cls)
+        return cls
+
+    return decorate(cls) if cls is not None else decorate
 
 
-_PARSER_METHODS = frozenset(
-    {"parse", "parse_from", "try_parse_from", "from_arg_matches", "to_command"},
-)
-
-
+@overload
+def parser[T](cls: type[T], /) -> type[T]: ...
+@overload
+def parser[T](
+    *,
+    name: str | None = None,
+    about: str | None = None,
+    version: str | None = None,
+    aliases: Iterable[str] = (),
+    visible_aliases: Iterable[str] = (),
+    arg_required_else_help: bool = False,
+    disable_help_flag: bool = False,
+    disable_version_flag: bool = False,
+    disable_help_subcommand: bool = False,
+) -> Callable[[type[T]], type[T]]: ...
 @dataclass_transform(kw_only_default=True, frozen_default=True, field_specifiers=(arg,))
-class Parser:
-    """A command, defined by a class, like clap's `#[derive(Parser)]`.
+def parser(
+    cls: type | None = None,
+    /,
+    *,
+    name: str | None = None,
+    about: str | None = None,
+    version: str | None = None,
+    aliases: Iterable[str] = (),
+    visible_aliases: Iterable[str] = (),
+    arg_required_else_help: bool = False,
+    disable_help_flag: bool = False,
+    disable_version_flag: bool = False,
+    disable_help_subcommand: bool = False,
+) -> Any:
+    """Turn a class into a command, like clap's `#[derive(Parser)]`.
 
-    Class keywords configure the command:
-    `class Git(Parser, name="git", version="1.0.0"): ...`. The name defaults
-    to the class name in kebab-case (`CloneRepo` -> `clone-repo`), `about` to
-    the first paragraph of the docstring. The same class works as the root or
-    as a subcommand.
+    Usable as `@parser` or `@parser(version="1.0.0", ...)`. The name
+    defaults to the class name in kebab-case (`CloneRepo` -> `clone-repo`),
+    `about` to the first paragraph of the docstring. The same class works as
+    the root command or as a subcommand.
     """
 
-    def __init_subclass__(
-        cls,
-        *,
-        name: str | None = None,
-        about: str | None = None,
-        version: str | None = None,
-        aliases: Iterable[str] = (),
-        visible_aliases: Iterable[str] = (),
-        arg_required_else_help: bool = False,
-        disable_help_flag: bool = False,
-        disable_version_flag: bool = False,
-        disable_help_subcommand: bool = False,
-    ) -> None:
-        super().__init_subclass__()
+    def decorate(cls: type) -> type:
+        invariant(
+            cls not in _ARGS_CLASSES,
+            f"{cls.__qualname__}: decorate with exactly one of @parser or @args",
+        )
         # Read before dataclass() fills in a generated signature as the docstring.
         doc = cls.__dict__.get("__doc__")
         _make_dataclass(cls)
-        clash = sorted(_PARSER_METHODS & {field.name for field in _fields_of(cls)})
-        invariant(
-            not clash,
-            f"{cls.__qualname__}: field {clash[0] if clash else ''!r} would hide "
-            f"Parser.{clash[0] if clash else ''}(); rename the field",
-        )
         cmd = Command(name if name is not None else _kebab(cls.__name__))
-        about = about if about is not None else _about(doc)
-        if about is not None:
-            cmd = cmd.about(about)
+        about_text = about if about is not None else _about(doc)
+        if about_text is not None:
+            cmd = cmd.about(about_text)
         if version is not None:
             cmd = cmd.version(version)
         for alias in _names("aliases", aliases):
@@ -149,40 +185,50 @@ class Parser:
             .disable_version_flag(disable_version_flag)
             .disable_help_subcommand(disable_help_subcommand)
         )
+        return cls
 
-    @classmethod
-    def to_command(cls) -> Command:
-        """The `Command` this class describes, for help, `debug_assert()` or adding to it.
+    return decorate(cls) if cls is not None else decorate
 
-        Parse a modified command and read it back with `from_arg_matches`.
-        """
-        invariant(cls is not Parser, "Parser.to_command(): call it on a subclass")
-        return _command(cls, ())
 
-    @classmethod
-    def from_arg_matches(cls, matches: ArgMatches) -> Self:
-        """Build an instance from matches of `to_command()` (or a command extending it)."""
-        invariant(cls is not Parser, "Parser.from_arg_matches(): call it on a subclass")
-        return _construct(cls, matches)
+# -- reading a @parser class -----------------------------------------------------
 
-    @classmethod
-    def try_parse_from(cls, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> Self | Error:
-        """Pure, like `Command.try_get_matches_from`: an `Error` for what the user got wrong."""
-        result = cls.to_command().try_get_matches_from(argv, env)
-        return result if isinstance(result, Error) else cls.from_arg_matches(result)
 
-    @classmethod
-    def parse_from(cls, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> Self:
-        """Like `try_parse_from`, but print the error and exit on failure."""
-        result = cls.try_parse_from(argv, env)
-        if isinstance(result, Error):
-            result.exit()
-        return result
+def to_command(cls: type) -> Command:
+    """The `Command` a `@parser` class describes, for help, `debug_assert()` or adding to it.
 
-    @classmethod
-    def parse(cls) -> Self:
-        """Parse `sys.argv` with `os.environ`, exiting on error."""
-        return cls.parse_from(sys.argv, os.environ)
+    Parse a modified command and read it back with `from_arg_matches`.
+    """
+    invariant(cls in _HEADS, f"to_command(): {cls!r} is not decorated with @parser")
+    return _command(cls, ())
+
+
+def from_arg_matches[T](cls: type[T], matches: ArgMatches) -> T:
+    """Build an instance from matches of `to_command(cls)` (or a command extending it)."""
+    invariant(cls in _HEADS, f"from_arg_matches(): {cls!r} is not decorated with @parser")
+    return _construct(cls, matches)
+
+
+def try_parse_from[T](
+    cls: type[T],
+    argv: Iterable[str],
+    env: Mapping[str, str] = _NO_ENV,
+) -> T | Error:
+    """Pure, like `Command.try_get_matches_from`: an `Error` for what the user got wrong."""
+    result = to_command(cls).try_get_matches_from(argv, env)
+    return result if isinstance(result, Error) else from_arg_matches(cls, result)
+
+
+def parse_from[T](cls: type[T], argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> T:
+    """Like `try_parse_from`, but print the error and exit on failure."""
+    result = try_parse_from(cls, argv, env)
+    if isinstance(result, Error):
+        result.exit()
+    return result
+
+
+def parse[T](cls: type[T]) -> T:
+    """Parse `sys.argv` with `os.environ`, exiting on error."""
+    return parse_from(cls, sys.argv, os.environ)
 
 
 # -- derivation ---------------------------------------------------------------
@@ -194,13 +240,13 @@ class _Subcommand:
 
     where: str
     field: str
-    by_name: Mapping[str, type[Parser]]
+    by_name: Mapping[str, type]
     optional: bool
 
 
 @dataclass(frozen=True, slots=True)
 class _FlattenReader:
-    """How to read a flattened `Args` field: build its class from the matches."""
+    """How to read a flattened `@args` field: build its class from the matches."""
 
     field: str
     cls: type
@@ -226,9 +272,19 @@ class _Fields:
 
 
 _HEADS: weakref.WeakKeyDictionary[type, Command] = weakref.WeakKeyDictionary()
-"""Each Parser class's command without args or subcommands, built at the class statement."""
+"""Each `@parser` class's command without args or subcommands, built at decoration."""
+_ARGS_CLASSES: weakref.WeakSet[type] = weakref.WeakSet()
+"""Classes decorated with `@args`, checked to keep `@parser` and `@args` exclusive."""
 _FIELDS: weakref.WeakKeyDictionary[type, _Fields] = weakref.WeakKeyDictionary()
 _COMMANDS: weakref.WeakKeyDictionary[type, Command] = weakref.WeakKeyDictionary()
+
+
+def _is_parser_class(value: object) -> bool:
+    return isinstance(value, type) and value in _HEADS
+
+
+def _is_args_class(value: object) -> bool:
+    return isinstance(value, type) and value in _ARGS_CLASSES
 
 
 def _make_dataclass(cls: type) -> None:
@@ -246,7 +302,7 @@ def _fields_of(cls: type) -> tuple[dataclasses.Field[Any], ...]:
     return dataclasses.fields(cast("Any", cls))
 
 
-def _command(cls: type[Parser], stack: tuple[type, ...]) -> Command:
+def _command(cls: type, stack: tuple[type, ...]) -> Command:
     cached = _COMMANDS.get(cls)
     if cached is not None:
         return cached
@@ -297,7 +353,7 @@ def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
         return cached
     invariant(
         cls not in stack,
-        f"{cls.__qualname__}: flattened Args form a cycle: "
+        f"{cls.__qualname__}: flattened @args form a cycle: "
         f"{' -> '.join(c.__qualname__ for c in (*stack, cls))}",
     )
     try:
@@ -308,14 +364,14 @@ def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
             f"classes and type aliases they name must be defined at module level",
             exc,
         )
-    args: list[Arg] = []
+    args_out: list[Arg] = []
     readers: list[_Reader] = []
     subcommand: _Subcommand | None = None
     for field in _fields_of(cls):
         where = f"{cls.__qualname__}.{field.name}"
         options = field.metadata.get(_METADATA_KEY)
         optional, members = _split_optional(hints[field.name])
-        if any(_is_class(member, Parser) for member in members):
+        if any(_is_parser_class(member) for member in members):
             invariant(
                 subcommand is None,
                 f"{where}: {cls.__qualname__} already has subcommand field "
@@ -323,18 +379,18 @@ def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
             )
             subcommand = _subcommand_field(where, field, members, optional, options)
             readers.append(subcommand)
-        elif any(_is_class(member, Args) for member in members):
+        elif any(_is_args_class(member) for member in members):
             invariant(
                 len(members) == 1 and not optional,
-                f"{where}: a flattened Args field must have exactly one Args type",
+                f"{where}: a flattened @args field must have exactly one @args type",
             )
             invariant(
                 options is None and field.default is MISSING,
-                f"{where}: a flattened Args field takes no arg() or default",
+                f"{where}: a flattened @args field takes no arg() or default",
             )
             group = cast("type", members[0])
             nested = _fields(group, (*stack, cls))
-            args.extend(nested.args)
+            args_out.extend(nested.args)
             readers.append(_FlattenReader(field=field.name, cls=group))
         else:
             try:
@@ -349,14 +405,14 @@ def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
             except AssertionError as exc:
                 exc.add_note(f"argbuilder: in field {where}")
                 raise
-            args.append(built)
+            args_out.append(built)
             readers.append(reader)
     invariant(
-        subcommand is None or issubclass(cls, Parser),
-        f"{cls.__qualname__}: an Args class cannot hold a subcommand; make it a Parser",
+        subcommand is None or cls in _HEADS,
+        f"{cls.__qualname__}: an @args class cannot hold a subcommand; use @parser",
     )
     plan = tuple((reader.field, _resolve_reader(reader)) for reader in readers)
-    result = _Fields(tuple(args), subcommand, tuple(readers), plan)
+    result = _Fields(tuple(args_out), subcommand, tuple(readers), plan)
     _FIELDS[cls] = result
     return result
 
@@ -369,16 +425,16 @@ def _subcommand_field(
     options: _ArgOptions | None,
 ) -> _Subcommand:
     invariant(
-        all(_is_class(member, Parser) for member in members),
-        f"{where}: a subcommand field must be a union of Parser classes, got {members!r}",
+        all(_is_parser_class(member) for member in members),
+        f"{where}: a subcommand field must be a union of @parser classes, got {members!r}",
     )
     invariant(options is None, f"{where}: arg() does not apply to a subcommand field")
     invariant(
         field.default is MISSING or (optional and field.default is None),
         f"{where}: a subcommand field can only default to None, and only with '| None'",
     )
-    by_name: dict[str, type[Parser]] = {}
-    for member in cast("Sequence[type[Parser]]", members):
+    by_name: dict[str, type] = {}
+    for member in cast("Sequence[type]", members):
         name = _HEADS[member].get_name()
         taken = by_name.get(name)
         invariant(

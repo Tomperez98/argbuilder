@@ -17,13 +17,16 @@ from argbuilder import (
     ArgMatches,
     Command,
     Error,
-    Parser,
     ValueParser,
     ValueSource,
+    parser,
+    to_command,
+    try_parse_from,
 )
 
 
-class _Cli(Parser):
+@parser
+class _Cli:
     name: str = "x"
     tag: tuple[str, ...] = ()
 
@@ -77,5 +80,5 @@ def test_value_parser_signatures_are_pinned() -> None:
 
 
 def test_derived_entry_points_are_pinned() -> None:
-    assert_type(_Cli.try_parse_from(["p", "x"]), _Cli | Error)
-    assert_type(_Cli.to_command(), Command)
+    assert_type(try_parse_from(_Cli, ["p", "x"]), _Cli | Error)
+    assert_type(to_command(_Cli), Command)
