@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from argbuilder import Error, Parser, ValueValidation, arg
+from argbuilder import Error, ValueValidation, arg, parse, parser, to_command
 
 type Color = Literal["always", "auto", "never"]
 
 
-class Git(Parser, version="1.0.0"):
+@parser(version="1.0.0")
+class Git:
     """A fictional versioning CLI."""
 
     verbose: int = arg(
@@ -31,14 +32,16 @@ class Git(Parser, version="1.0.0"):
     command: Clone | Push | Add
 
 
-class Clone(Parser):
+@parser
+class Clone:
     """Clones repos."""
 
     remote: str = arg(help="The remote to clone")
     dir: Path | None = arg(help="Where to clone into")
 
 
-class Push(Parser):
+@parser
+class Push:
     """Pushes things."""
 
     remote: str | None = arg(help="The remote to target")
@@ -52,7 +55,8 @@ class Push(Parser):
     force: bool = arg(short=True, long=True)
 
 
-class Add(Parser, visible_aliases=["stage"]):
+@parser(visible_aliases=["stage"])
+class Add:
     """Adds things."""
 
     paths: tuple[Path, ...] = arg(required=True)
@@ -63,7 +67,7 @@ def run(git: Git) -> str | Error:
     match git.command:
         case Clone(remote=remote, dir=dir):
             if "://" not in remote and not remote.startswith("git@"):
-                return Git.to_command().error(ValueValidation(), f"'{remote}' is not a remote URL")
+                return to_command(Git).error(ValueValidation(), f"'{remote}' is not a remote URL")
             return f"cloning {remote} into {dir}"
         case Push(remote=remote, port=port, force=force):
             forced = " (forced)" if force else ""
@@ -73,7 +77,7 @@ def run(git: Git) -> str | Error:
 
 
 if __name__ == "__main__":
-    result = run(Git.parse())
+    result = run(parse(Git))
     if isinstance(result, Error):
         result.exit()
     print(result)  # noqa: T201

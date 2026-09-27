@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from argbuilder import Arg, Command, Parser, arg
+from argbuilder import Arg, Command, arg, parser
 from argbuilder._build import ResolvedArg, build
 from argbuilder._derive import _fields, _read_subcommand, _Subcommand
 from argbuilder._field import (
@@ -53,7 +53,8 @@ def test_parse_values_panics_without_a_parser() -> None:
         parser._parse_values(broken, ["x"], None)  # noqa: SLF001
 
 
-class Leaf(Parser):
+@parser
+class Leaf:
     pass
 
 
@@ -71,7 +72,8 @@ def test_suggest_is_one_shared_closeness_rule() -> None:
 def test_field_readers_are_inspectable_data() -> None:
     # Readers are descriptors, not closures, so the derivation can be asserted
     # without parsing anything.
-    class Sample(Parser):
+    @parser
+    class Sample:
         name: str
         tag: tuple[str, ...] = ()
         verbose: int = arg(action="count")

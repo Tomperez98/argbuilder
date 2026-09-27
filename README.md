@@ -67,7 +67,7 @@ A fuller CLI is in [`examples/git.py`](examples/git.py)
 ## Or derive it from classes
 
 Like clap's `#[derive(Parser)]`: fields describe the arguments, their types
-pick the action, and parsing returns an instance. The derive only builds a
+pick the action, and parsing returns an instance. The decorator only builds a
 `Command`, so help, errors and the rules above are the same.
 
 ```python
@@ -75,31 +75,34 @@ from __future__ import annotations  # lets Git name Clone before it's defined
 
 from pathlib import Path
 
-from argbuilder import Parser, arg
+from argbuilder import arg, parse, parser
 
 
-class Git(Parser, version="1.0.0"):
+@parser(version="1.0.0")
+class Git:
     """A fictional versioning CLI."""  # the docstring's first paragraph is `about`
 
     verbose: int = arg(short=True, long=True, action="count", global_=True)
     command: Clone | Push  # add `| None = None` to make it optional
 
 
-class Clone(Parser):
+@parser
+class Clone:
     """Clones repos."""
 
     remote: str
     dir: Path | None = None
 
 
-class Push(Parser):
+@parser
+class Push:
     """Pushes things."""
 
     port: int = arg(short=True, long=True, value_parser=range(1, 65536), default=22)
     force: bool = arg(short=True, long=True)
 
 
-git = Git.parse()  # or Git.try_parse_from(argv, env) -> Git | Error
+git = parse(Git)  # or try_parse_from(Git, argv, env) -> Git | Error
 match git.command:
     case Push(port=port, force=force):
         ...
@@ -115,23 +118,31 @@ match git.command:
 | `x: tuple[T, ...]` | `append`: every value, `()` when absent; `arg(required=True)` for at least one |
 | `x: bool` | `set_true` flag; `arg(action="set_false")` for the opposite |
 | `x: int = arg(action="count")` | `count` flag |
-| `x: A \| B` (`Parser` classes) | the subcommand, named in kebab-case (`RemoteAdd` → `remote-add`) |
-| `x: Shared` (an `Args` class) | its fields, flattened in (clap's `#[command(flatten)]`) |
+| `x: A \| B` (`@parser` classes) | the subcommand, named in kebab-case (`RemoteAdd` → `remote-add`) |
+| `x: Shared` (an `@args` class) | its fields, flattened in (clap's `#[command(flatten)]`) |
 
 Without `short` or `long` a field is positional. `short=True` / `long=True`
 / `env=True` derive `-d` / `--dry-run` / `DRY_RUN` from the field name.
-Command options go on the class: `name`, `about`, `version`, `aliases`,
-`visible_aliases`, `arg_required_else_help`, `disable_help_flag`,
-`disable_version_flag`, `disable_help_subcommand`.
+Command options go on the decorator: `@parser(name=..., about=..., version=...,
+aliases=..., visible_aliases=..., arg_required_else_help=..., disable_help_flag=...,
+disable_version_flag=..., disable_help_subcommand=...)`. `@args` flattens a
+reusable group of fields into every command that has a field of its type and
+takes no options of its own. Both work as `@parser` / `@args` or called with
+parens, `@parser()` / `@args()`.
 
-Subclasses are frozen, keyword-only dataclasses (don't add `@dataclass`),
-and type checkers see them that way. Definition bugs still panic: class
-options at the `class` statement, fields at the first `to_command()` or
+A decorated class is a frozen, keyword-only dataclass (don't add `@dataclass`
+yourself), and type checkers see it that way. Definition bugs still panic:
+class options when the decorator runs, fields at the first `to_command()` or
 parse, since annotations may name classes defined further down. Test them
-with `Git.to_command().debug_assert()`.
+with `to_command(Git).debug_assert()`.
+
+Parsing, help and errors are reached through module-level functions, not
+methods, since a decorator can't add typed methods a checker will see:
+`to_command(cls)`, `parse(cls)`, `parse_from(cls, argv, env)`,
+`try_parse_from(cls, argv, env) -> T | Error`, `from_arg_matches(cls, matches)`.
 
 For anything the derive doesn't cover, extend the builder and read the
-result back: `Git.from_arg_matches(Git.to_command().arg(...).get_matches())`.
+result back: `from_arg_matches(Git, to_command(Git).arg(...).get_matches())`.
 The same CLI as [`examples/git.py`](examples/git.py), derived, is in
 [`examples/git_derive.py`](examples/git_derive.py).
 
@@ -140,7 +151,7 @@ Argument types are read at runtime, so keep their imports out of
 
 ```toml
 [lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["argbuilder.Parser", "argbuilder.Args"]
+runtime-evaluated-decorators = ["argbuilder.parser", "argbuilder.args"]
 ```
 
 ## Install

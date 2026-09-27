@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from argbuilder import ArgMatches, Error
+from argbuilder import ArgMatches, Error, to_command, try_parse_from
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,14 +56,14 @@ def test_example_git_definition_is_valid(git: Any) -> None:
 def test_example_git_derive_help_matches_the_builder_example(git: Any, git_derive: Any) -> None:
     # The same CLI built two ways must render identically; drift is the bug.
     builder = git.cli()
-    derived = git_derive.Git.to_command()
+    derived = to_command(git_derive.Git)
     assert derived.render_help() == builder.render_help()
     assert derived.render_usage() == builder.render_usage()
     assert derived.render_markdown() == builder.render_markdown()
 
 
 def test_example_git_derive_definition_is_valid(git_derive: Any) -> None:
-    git_derive.Git.to_command().debug_assert()
+    to_command(git_derive.Git).debug_assert()
 
 
 def test_example_git_clone_dispatch(git: Any) -> None:
@@ -99,7 +99,7 @@ def test_example_git_global_count_reaches_dispatch(git: Any) -> None:
 
 
 def test_example_git_derive_dispatch_matches_the_builder(git: Any, git_derive: Any) -> None:
-    parsed = git_derive.Git.try_parse_from(["git", "clone", "https://example.com/x", "dest"])
+    parsed = try_parse_from(git_derive.Git, ["git", "clone", "https://example.com/x", "dest"])
     assert not isinstance(parsed, Error)
     matches = git.cli().try_get_matches_from(["git", "clone", "https://example.com/x", "dest"])
     assert isinstance(matches, ArgMatches)
