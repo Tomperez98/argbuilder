@@ -62,3 +62,15 @@ run = "uv run --no-project python scripts/release.py tag"
 [tasks.publish]
 description = "Publish the artifacts already in dist/ (release job only); skips files PyPI already has"
 run = "uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist/*.whl dist/*.tar.gz"
+
+# The contract (contract/): an Accordant spec of the public parsing API judges
+# every response. Needs the .NET SDK besides uv.
+[tasks."contract:check"]
+description = "This build against this spec"
+depends = ["sync"]
+run = "uv run --no-project python scripts/compat.py check"
+
+[tasks."contract:compat"]
+description = "This build against the last release's API and contract (bootstraps if it shipped none)"
+depends = ["sync"]
+run = "uv run --no-project python scripts/compat.py compat"

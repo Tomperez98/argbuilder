@@ -31,7 +31,9 @@ concurrency:
 permissions: {}
 
 jobs:
-  # The exact suite CI runs, the whole Python matrix, on the tag commit.
+  # The exact suite CI runs, the whole Python matrix, on the tag commit,
+  # including the contract job: the previous release's contract judges this
+  # one, and an undeclared break stops the release here.
   ci:
     uses: ./.github/workflows/ci.yml
     permissions:
@@ -99,6 +101,14 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: uv run --no-project python scripts/release.py notes "$VERSION" > notes.md
+      # Ship the contract with the release (COMPAT.md rule 4). The tag holds
+      # the spec and driver; the plan records exactly which calls this
+      # release's contract makes, so a later run can be compared with it.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Export the contract's test plan
+        run: dotnet run --project contract/Contract -- export contract-plan.json
 
       # These are the bytes that were just tested; publish uploads them as-is.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -110,6 +120,11 @@ jobs:
         with:
           name: notes
           path: notes.md
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contract
+          path: contract-plan.json
           if-no-files-found: error
 
   publish:
@@ -162,6 +177,9 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: notes
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: contract
       - name: Create, upload, then publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,7 +199,7 @@ jobs:
               --title "argbuilder $VERSION" \
               --notes-file notes.md --generate-notes
           fi
-          gh release upload "$TAG" --clobber dist/*.whl dist/*.tar.gz
+          gh release upload "$TAG" --clobber dist/*.whl dist/*.tar.gz contract-plan.json
           gh release edit "$TAG" --draft=false --latest
 
   # Check what users actually get, from the outside: PyPI serves exactly

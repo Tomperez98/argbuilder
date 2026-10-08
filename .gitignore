@@ -17,3 +17,10 @@ mutants/
 
 # Smoke-test venv created by `mise run smoke`
 .smoke/
+
+# Contract runs: generated plan and trace, .NET build output, compat scratch
+contract/plan.json
+contract/trace.json
+contract/Contract/bin/
+contract/Contract/obj/
+.contract-compat/

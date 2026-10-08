@@ -29,6 +29,7 @@ Changelog = "https://github.com/Tomperez98/argbuilder/releases"
 
 [dependency-groups]
 dev = [
+    "griffe>=2.3.2",
     "hypothesis>=6.168.1",
     "mutmut>=3.8.0",
     "pytest>=9.1.1",

@@ -118,3 +118,48 @@ jobs:
         env:
           VERSION: ${{ needs.pypi.outputs.version }}
         run: /tmp/user/bin/python scripts/release.py smoke "$VERSION" released/examples
+
+  # The released contract judges what PyPI serves: the spec, driver, and
+  # plan all come from the tag (COMPAT.md rule 4), the wheel from PyPI.
+  contract:
+    name: The released contract judges the PyPI wheel
+    needs: pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.pypi.outputs.tag }}
+          persist-credentials: false
+      - name: Skip releases made before the contract existed
+        id: has
+        run: |
+          if [ -f contract/Contract/GitSpec.cs ]; then
+            echo "contract=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::${{ needs.pypi.outputs.tag }} shipped no contract; nothing to judge"
+            echo "contract=no" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.has.outputs.contract == 'yes'
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - if: steps.has.outputs.contract == 'yes'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Install from PyPI, run the released plan, judge it with the released spec
+        if: steps.has.outputs.contract == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.pypi.outputs.tag }}
+          VERSION: ${{ needs.pypi.outputs.version }}
+        run: |
+          uv venv --quiet --python 3.12 /tmp/user
+          uv pip install --quiet --python /tmp/user/bin/python "argbuilder==$VERSION"
+          # The plan recorded at release time; regenerate only if it's missing.
+          gh release download "$TAG" --pattern contract-plan.json ||
+            dotnet run --project contract/Contract -- export contract-plan.json
+          /tmp/user/bin/python contract/driver.py contract-plan.json trace.json
+          dotnet run --project contract/Contract -- check trace.json
+
