@@ -74,3 +74,92 @@ jobs:
         run: mise run test
       - name: Install the wheel into a clean venv and run the examples
         run: mise run smoke
+
+  # The contract (contract/): the spec judges this build, and the previous
+  # release's API and spec judge it too (ship skill, COMPAT.md). The job
+  # summary carries the label and the promises that changed (CI.md rule 10).
+  contract:
+    name: Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # the previous release tag and its contract
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv and dotnet come from their actions
+          cache: false
+      - name: This build against this spec
+        run: mise run contract:check
+      - name: This build against the previous release's API and contract
+        run: mise run contract:compat
+      # contract_report.yml posts this on the pull request. It runs with a
+      # write token this job must never hold, so hand it data, not access.
+      - name: Hand the report to contract_report.yml
+        if: always() && github.event_name == 'pull_request'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f .contract-compat/report/label ]; then
+            echo "$PR" > .contract-compat/report/pr
+          fi
+      - if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contract-report
+          path: .contract-compat/report/
+          if-no-files-found: ignore
+      - name: Keep the traces of a failing run
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contract-traces
+          path: |
+            contract/trace.json
+            .contract-compat/*.json
+          if-no-files-found: ignore
+
+  # A scheduled run blocks nothing and nobody is watching it, so its failure
+  # goes where someone will act on it (MONITOR.md rule 4): one tracking issue,
+  # updated while main stays red and closed when it's green again. One issue,
+  # not a red badge every week that people learn to ignore.
+  scheduled:
+    name: Track the scheduled run
+    needs: [checks, test, contract]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update, or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled CI is failing on main"
+          issue="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+          if [ "$FAILED" = true ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "Still failing: $RUN_URL"
+            else
+              gh issue create --title "$title" --body "$(printf '%s\n' \
+                "The weekly run on main failed: $RUN_URL" "" \
+                "Nothing in the repo changed, so something outside it did: a new Python," \
+                "a runner image, PyPI. Fix it, or close this with the reason.")"
+            fi
+          elif [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Green again: $RUN_URL"
+          fi

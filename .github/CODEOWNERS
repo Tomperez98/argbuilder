@@ -1,0 +1,5 @@
+# The contract is what users were promised: a change to it needs an owner's
+# review (ship skill, CI.md rule 10). Enforce with the main branch ruleset's
+# "Require review from Code Owners".
+/contract/Contract/ @Tomperez98
+/contract/driver.py @Tomperez98
