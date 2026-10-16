@@ -9,7 +9,7 @@ precondition: it exits non-zero with the artifact name and both values.
     python scripts/release.py smoke VERSION EXAMPLES    # the installed package works
     python scripts/release.py preflight VERSION         # safe to publish dist/ to PyPI
     python scripts/release.py verify-pypi VERSION       # PyPI serves exactly dist/
-    python scripts/release.py notes VERSION             # the mechanical part of the notes
+    python scripts/release.py notes VERSION             # install facts plus the changelog entry
 """
 
 from __future__ import annotations
@@ -62,6 +62,52 @@ def parse_version(version: str) -> tuple[int, int, int]:
 
 def expected_files(version: str) -> set[str]:
     return {f"{PACKAGE}-{version}-py3-none-any.whl", f"{PACKAGE}-{version}.tar.gz"}
+
+
+CHANGELOG = ROOT / "CHANGELOG.md"
+# One section per release, `## [version] ...` up to the next `## [` heading.
+# The changelog is the single source for the release notes and for the guard
+# that a declared break is written down (ship skill, COMPAT.md rule 6).
+_SECTION = re.compile(r"^## \[([^\]]+)\][^\n]*\n", re.MULTILINE)
+_BREAKING = re.compile(r"^###[^\n]*\bbreaking\b", re.IGNORECASE | re.MULTILINE)
+_LINK_REF = re.compile(r"^\[[^\]]+\]:\s+\S.*$", re.MULTILINE)
+
+
+def changelog_entries(source: str) -> dict[str, str]:
+    """Version -> section body, in file order. `Unreleased` is a version here too."""
+    headings = list(_SECTION.finditer(source))
+    entries: dict[str, str] = {}
+    for index, heading in enumerate(headings):
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(source)
+        body = _LINK_REF.sub("", source[heading.end() : end])
+        entries[heading.group(1)] = body.strip()
+    return entries
+
+
+def changelog_entry(source: str, version: str) -> str | None:
+    """The section for `version`, or None when the changelog has none."""
+    return changelog_entries(source).get(version)
+
+
+def is_breaking(source: str, version: str) -> bool:
+    """Whether the section for `version` marks a breaking change."""
+    entry = changelog_entry(source, version)
+    return entry is not None and _BREAKING.search(entry) is not None
+
+
+def read_changelog() -> str:
+    """The changelog text; a missing file is a broken precondition."""
+    if not CHANGELOG.is_file():
+        fail(f"{CHANGELOG.name} is missing; every release has a section for its version")
+    return CHANGELOG.read_text(encoding="utf-8")
+
+
+def require_changelog(version: str, source: str | None = None) -> str:
+    """The changelog section for `version`; a missing one is a broken precondition."""
+    entry = changelog_entry(read_changelog() if source is None else source, version)
+    if entry is None:
+        fail(f"{CHANGELOG.name} has no section for {version}; add one before releasing")
+    return entry
 
 
 def sha256(path: Path) -> str:
@@ -126,6 +172,7 @@ def cmd_tag() -> None:
     pyproject = tomllib.loads(git("show", "origin/main:pyproject.toml"))
     version = pyproject["project"]["version"]
     parse_version(version)
+    require_changelog(version, git("show", f"origin/main:{CHANGELOG.name}"))
     tag = f"v{version}"
     if git("tag", "--list", tag):
         fail(
@@ -180,6 +227,7 @@ def cmd_smoke(version: str, examples: str) -> None:
 def cmd_preflight(version: str) -> None:
     """Safe to publish when the version is new, or is a partial upload of these exact bytes."""
     cmd_check_dist(version)
+    require_changelog(version)
     local = dist_digests()
     published = pypi_release(version)
     if published is None:
@@ -221,15 +269,18 @@ def cmd_verify_pypi(version: str) -> None:
 
 
 def cmd_notes(version: str) -> None:
-    """Install and compatibility facts, from pyproject: people write the story."""
+    """Install and compatibility facts, then this version's changelog entry."""
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     if project["version"] != version:
         fail(f"pyproject version is {project['version']}, expected {version}")
+    entry = require_changelog(version)
     say(
         f"Requires Python {project['requires-python']}. No dependencies.\n\n"
         f"```\npip install {PACKAGE}=={version}\n```\n\n"
         f"PyPI: https://pypi.org/project/{PACKAGE}/{version}/",
     )
+    say("")
+    say(entry)
 
 
 def main(argv: list[str]) -> None:

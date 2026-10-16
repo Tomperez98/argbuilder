@@ -16,7 +16,9 @@ also needs the release tags (`git fetch --tags`).
 It labels the change (unchanged / additive / changed / breaking), writes the
 label and a summary to .contract-compat/report/ (and the job summary on CI),
 and fails only on an undeclared break: the baseline's contract rejects this
-build and the major version didn't go up (ship skill, COMPAT.md rule 6).
+build and the major version didn't go up (ship skill, COMPAT.md rule 6). A
+declared break must also carry a breaking entry in CHANGELOG.md, and the
+current version must have a section there at all.
 """
 
 from __future__ import annotations
@@ -32,7 +34,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from release import NETWORK_ATTEMPTS, ROOT, fail, git, parse_version, say
+from release import (
+    NETWORK_ATTEMPTS,
+    ROOT,
+    changelog_entry,
+    fail,
+    git,
+    is_breaking,
+    parse_version,
+    read_changelog,
+    say,
+)
 
 type Label = Literal["unchanged", "additive", "changed", "breaking"]
 type Severity = Literal["error", "warning", "notice"]
@@ -259,7 +271,20 @@ def cmd_compat() -> None:
             file.write(summary)
     say(summary)
 
-    match severity(verdict.label, declared=verdict.declared):
+    level = severity(verdict.label, declared=verdict.declared)
+    changelog = read_changelog()
+    if changelog_entry(changelog, verdict.version) is None:
+        fail(
+            f"CHANGELOG.md has no section for {verdict.version}; write it in the "
+            "version-bump pull request, before CI can call this releasable",
+        )
+    if level == "notice" and not is_breaking(changelog, verdict.version):
+        fail(
+            f"the {baseline} contract rejects this build and {verdict.version} is a major bump, "
+            f"but CHANGELOG.md has no breaking entry for {verdict.version}; add a "
+            "'### ... (breaking)' section with a migration note, or fix the regression",
+        )
+    match level:
         case "error":
             fail(f"the build breaks the {baseline} contract and the version doesn't declare it")
         case "notice":
