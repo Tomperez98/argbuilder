@@ -1,20 +1,15 @@
 name: Release
 
 # Cut a release:
-#   1. Bump the version in a PR (`uv version --bump patch`) and merge it.
+#   1. Write the CHANGELOG.md entry and bump the version in a PR, and merge it.
 #   2. `mise run release:tag` tags that commit on origin/main and pushes the tag.
 # If a run fails, fix the cause and use "Re-run failed jobs": every step
 # skips work that is already done, so no version is burned.
 #
-# One-time setup, outside this file:
-# - PyPI trusted publisher: owner Tomperez98, repo argbuilder,
-#   workflow release.yml, environment pypi. No API token is stored.
-# - Environment `pypi` (Settings > Environments): deployment rule "selected
-#   tags" = `v*`; a required reviewer, or a wait timer if you're the only
-#   maintainer.
-# - Tag ruleset for `v*`: block updates and deletions, so a published tag
-#   never moves.
-# - Branch ruleset for main: require the CI checks and the merge queue.
+# The full checklist, the one-time setup (PyPI trusted publisher, the `pypi`
+# environment, the tag and main rulesets), and the recovery steps live in
+# RELEASING.md, so they exist in one place.
+#
 # GitHub emails the person who pushed the tag when any job here fails.
 
 on:
