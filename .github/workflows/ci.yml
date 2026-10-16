@@ -5,14 +5,10 @@ on:
     branches: [main]
   pull_request:
   merge_group:
-  # Weekly, so a new Python patch release or runner image that breaks the
-  # suite shows up without a commit. GitHub emails failures of scheduled
-  # runs to whoever last edited this cron line.
-  schedule:
-    - cron: "17 6 * * 1"
-  # The release workflow runs this exact suite against the tag commit.
-  # setup-uv turns its cache off by itself for tag pushes, so a release
-  # never restores a cache another ref could have written.
+  # The release workflow runs this exact suite against the tag commit (the
+  # weekly run lives in monitor.yml). setup-uv turns its cache off by itself
+  # for tag pushes, so a release never restores a cache another ref could
+  # have written.
   workflow_call:
 
 concurrency:
@@ -128,38 +124,3 @@ jobs:
             .contract-compat/*.json
           if-no-files-found: ignore
 
-  # A scheduled run blocks nothing and nobody is watching it, so its failure
-  # goes where someone will act on it (MONITOR.md rule 4): one tracking issue,
-  # updated while main stays red and closed when it's green again. One issue,
-  # not a red badge every week that people learn to ignore.
-  scheduled:
-    name: Track the scheduled run
-    needs: [checks, test, contract]
-    if: always() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      issues: write
-    steps:
-      - name: Open, update, or close the tracking issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="Scheduled CI is failing on main"
-          issue="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
-            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
-          if [ "$FAILED" = true ]; then
-            if [ -n "$issue" ]; then
-              gh issue comment "$issue" --body "Still failing: $RUN_URL"
-            else
-              gh issue create --title "$title" --body "$(printf '%s\n' \
-                "The weekly run on main failed: $RUN_URL" "" \
-                "Nothing in the repo changed, so something outside it did: a new Python," \
-                "a runner image, PyPI. Fix it, or close this with the reason.")"
-            fi
-          elif [ -n "$issue" ]; then
-            gh issue close "$issue" --comment "Green again: $RUN_URL"
-          fi
