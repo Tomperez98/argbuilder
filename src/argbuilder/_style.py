@@ -1,7 +1,7 @@
 """How output is dressed for a terminal: wrap width and ANSI color.
 
 Rendering takes a `Style` as a plain parameter and stays pure. Only
-`terminal_style()` looks at the process, and only `Error.exit()` calls it.
+`terminal_style()` looks at the process, and only `_cli.exit_with()` calls it.
 """
 
 from __future__ import annotations

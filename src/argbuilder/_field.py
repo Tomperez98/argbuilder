@@ -260,29 +260,7 @@ def _value_field(
     default: object,
     options: _ArgOptions,
 ) -> tuple[Arg, ValueReader | FlagReader]:
-    invariant(
-        len(members) == 1,
-        f"{where}: a union of {members!r} is not supported; "
-        f"use one type with a value_parser that returns it",
-    )
-    hint = members[0]
-    invariant(
-        get_origin(hint) is not list,
-        f"{where}: use tuple[T, ...] instead of list[T]; fields are immutable",
-    )
-    many = get_origin(hint) is tuple
-    element = hint
-    if many:
-        elements = get_args(hint)
-        invariant(
-            len(elements) == 2 and elements[1] is Ellipsis,
-            f"{where}: use tuple[T, ...]; a fixed-size tuple is not supported",
-        )
-        invariant(
-            not optional,
-            f"{where}: tuple[T, ...] is already empty when absent; drop '| None'",
-        )
-        element = _unalias(elements[0])
+    element, many = _element_and_arity(where, members, optional)
     action = _action(where, element, many, optional, options.action)
     invariant(
         not options.required or many,
@@ -293,19 +271,7 @@ def _value_field(
     built = _apply_options(Arg(name).action(action), options, name)
 
     if not takes_values(action):
-        implicit = {"set_true": False, "set_false": True, "count": 0}[action]
-        invariant(
-            default is MISSING or (default == implicit and type(default) is type(implicit)),
-            f"{where}: action {action!r} always defaults to {implicit!r}, got {default!r}"
-            + (
-                "; for a flag that turns something off, use arg(action='set_false')"
-                if action == "set_true"
-                else ""
-            ),
-        )
-        if action == "count":
-            return built, FlagReader(field=name, counter=True)
-        return built, FlagReader(field=name)
+        return built, _flag_field(where, name, action, default)
 
     like = (
         options.value_parser
@@ -317,6 +283,72 @@ def _value_field(
         built = built.value_parser(parser)
     check = _check_type(where, element, explicit=options.value_parser is not None)
 
+    built = _apply_field_default(where, built, default, optional=optional, many=many, parser=parser)
+    if options.required:
+        built = built.required(True)
+    return built, _reader_for(name, check, many=many, optional=optional)
+
+
+def _element_and_arity(
+    where: str,
+    members: Sequence[object],
+    optional: bool,
+) -> tuple[object, bool]:
+    """The single value type a field holds, and whether `tuple[T, ...]` makes it collect many."""
+    invariant(
+        len(members) == 1,
+        f"{where}: a union of {members!r} is not supported; "
+        f"use one type with a value_parser that returns it",
+    )
+    hint = members[0]
+    invariant(
+        get_origin(hint) is not list,
+        f"{where}: use tuple[T, ...] instead of list[T]; fields are immutable",
+    )
+    if get_origin(hint) is not tuple:
+        return hint, False
+    elements = get_args(hint)
+    invariant(
+        len(elements) == 2 and elements[1] is Ellipsis,
+        f"{where}: use tuple[T, ...]; a fixed-size tuple is not supported",
+    )
+    invariant(
+        not optional,
+        f"{where}: tuple[T, ...] is already empty when absent; drop '| None'",
+    )
+    return _unalias(elements[0]), True
+
+
+def _flag_field(
+    where: str,
+    name: str,
+    action: FieldAction,
+    default: object,
+) -> FlagReader:
+    """Check a flag field's default and build its reader (`counter` for a count field)."""
+    implicit = {"set_true": False, "set_false": True, "count": 0}[action]
+    invariant(
+        default is MISSING or (default == implicit and type(default) is type(implicit)),
+        f"{where}: action {action!r} always defaults to {implicit!r}, got {default!r}"
+        + (
+            "; for a flag that turns something off, use arg(action='set_false')"
+            if action == "set_true"
+            else ""
+        ),
+    )
+    return FlagReader(field=name, counter=action == "count")
+
+
+def _apply_field_default(
+    where: str,
+    built: Arg,
+    default: object,
+    *,
+    optional: bool,
+    many: bool,
+    parser: ValueParser[Any] | None,
+) -> Arg:
+    """Apply the field's default, or mark it required when a single value has none."""
     if default is not MISSING:
         invariant(
             not optional or default is None,
@@ -333,14 +365,15 @@ def _value_field(
             built = built.default_value(_raw_default(where, parser, default))
     elif not optional and not many:
         built = built.required(True)
-    if options.required:
-        built = built.required(True)
+    return built
 
-    if many:
-        return built, ValueReader(field=name, type_=check, getter="get_many")
-    if optional:
-        return built, ValueReader(field=name, type_=check, getter="get_one")
-    return built, ValueReader(field=name, type_=check, getter="get_required")
+
+def _reader_for(name: str, check: type, *, many: bool, optional: bool) -> ValueReader:
+    """The reader for a value field: `get_many`, `get_one` or `get_required`, by arity."""
+    getter: Literal["get_one", "get_required", "get_many"] = (
+        "get_many" if many else "get_one" if optional else "get_required"
+    )
+    return ValueReader(field=name, type_=check, getter=getter)
 
 
 def _action(

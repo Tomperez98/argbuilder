@@ -135,6 +135,8 @@ class ResolvedCommand:
     visible_aliases: tuple[str, ...]
     inherited: frozenset[str]
     """Ids of the global arguments this command got from its ancestors."""
+    env_names: frozenset[str]
+    """Every environment variable this command or a subcommand below it reads."""
     subcommand_required: bool
     arg_required_else_help: bool
     help_hint: str | None
@@ -178,6 +180,63 @@ def _build(
         f"{where}: aliases only apply to subcommands",
     )
 
+    args = _resolve_args(spec, where, inherited)
+    by_id, by_short, by_long = _index_args(args, where)
+
+    positionals = tuple(arg for arg in args if arg.is_positional)
+    _check_positionals(positionals, where)
+    _check_cross_references(args, by_id, where)
+    groups = _resolve_groups(spec, by_id, where)
+
+    globals_ = tuple(arg for arg in args if arg.global_)  # inherited ones first
+    # Precompute the subsets `_validate` needs, so a parse scans every argument
+    # only once (in the matched loop), not four times including auto/hidden ones.
+    arity_mins = tuple((arg, arg.min_values) for arg in positionals if arg.min_values > 0)
+    required_args = tuple(arg for arg in args if arg.required)
+    conflicting_args = tuple(arg for arg in args if arg.conflicts_with)
+    requiring_args = tuple(arg for arg in args if arg.requires)
+
+    subcommands, subcommand_names, help_subcommand = _resolve_subcommands(
+        spec, path, depth, globals_, where
+    )
+    env_names = frozenset(arg.env for arg in args if arg.env is not None) | frozenset(
+        name for sub in subcommands.values() for name in sub.env_names
+    )
+    help_arg = next((arg for arg in args if arg.action == "help"), None)
+    return ResolvedCommand(
+        name=spec.name,
+        path=path,
+        about=spec.about,
+        version=spec.version,
+        args=tuple(args),
+        by_id=MappingProxyType(by_id),
+        by_short=MappingProxyType(by_short),
+        by_long=MappingProxyType(by_long),
+        positionals=positionals,
+        arity_mins=arity_mins,
+        required_args=required_args,
+        conflicting_args=conflicting_args,
+        requiring_args=requiring_args,
+        groups=tuple(groups),
+        subcommands=MappingProxyType(subcommands),
+        subcommand_names=MappingProxyType(subcommand_names),
+        help_subcommand=help_subcommand,
+        aliases=spec.aliases,
+        visible_aliases=spec.visible_aliases,
+        inherited=frozenset(arg.id for arg in inherited),
+        env_names=env_names,
+        subcommand_required=spec.subcommand_required,
+        arg_required_else_help=spec.arg_required_else_help,
+        help_hint=None if help_arg is None else _help_hint(help_arg),
+    )
+
+
+def _resolve_args(
+    spec: CommandSpec,
+    where: str,
+    inherited: tuple[ResolvedArg, ...],
+) -> list[ResolvedArg]:
+    """Resolve the command's arguments, validating them alongside inherited globals and flags."""
     args = [_resolve_arg(arg, where) for arg in spec.args]
     duplicate = _first_duplicate([arg.id for arg in args])
     if duplicate is not None:
@@ -213,7 +272,14 @@ def _build(
         spec.version is not None or not has_version,
         f"{where}: an argument uses action 'version' but the command has no version()",
     )
+    return args
 
+
+def _index_args(
+    args: Sequence[ResolvedArg],
+    where: str,
+) -> tuple[dict[str, ResolvedArg], dict[str, ResolvedArg], dict[str, ResolvedArg]]:
+    """Index by id and by every short/long spelling, panicking on a collision."""
     by_id = {arg.id: arg for arg in args}
     by_short: dict[str, ResolvedArg] = {}
     by_long: dict[str, ResolvedArg] = {}
@@ -222,9 +288,15 @@ def _build(
             _claim(by_short, short, "-", arg, where)
         for long in arg.longs:
             _claim(by_long, long, "--", arg, where)
+    return by_id, by_short, by_long
 
-    positionals = tuple(arg for arg in args if arg.is_positional)
-    _check_positionals(positionals, where)
+
+def _check_cross_references(
+    args: Sequence[ResolvedArg],
+    by_id: Mapping[str, ResolvedArg],
+    where: str,
+) -> None:
+    """Every `conflicts_with`/`requires` must name a real argument in scope."""
     for arg in args:
         for other in sorted(arg.conflicts_with | arg.requires):
             invariant(other != arg.id, f"{where}: argument {arg.id!r} refers to itself")
@@ -238,6 +310,12 @@ def _build(
                 f"global, so subcommands could not check it; make {other!r} global too",
             )
 
+
+def _resolve_groups(
+    spec: CommandSpec,
+    by_id: Mapping[str, ResolvedArg],
+    where: str,
+) -> list[ResolvedGroup]:
     groups: list[ResolvedGroup] = []
     for group in spec.groups:
         invariant(
@@ -251,14 +329,17 @@ def _build(
                 f"{where}: group {group.id!r} names unknown argument {member!r}",
             )
         groups.append(ResolvedGroup(group.id, group.args, group.required, group.multiple))
+    return groups
 
-    globals_ = tuple(arg for arg in args if arg.global_)  # inherited ones first
-    # Precompute the subsets `_validate` needs, so a parse scans every argument
-    # only once (in the matched loop), not four times including auto/hidden ones.
-    arity_mins = tuple((arg, arg.min_values) for arg in positionals if arg.min_values > 0)
-    required_args = tuple(arg for arg in args if arg.required)
-    conflicting_args = tuple(arg for arg in args if arg.conflicts_with)
-    requiring_args = tuple(arg for arg in args if arg.requires)
+
+def _resolve_subcommands(
+    spec: CommandSpec,
+    path: tuple[str, ...],
+    depth: int,
+    globals_: tuple[ResolvedArg, ...],
+    where: str,
+) -> tuple[dict[str, ResolvedCommand], dict[str, str], bool]:
+    """Build the subcommands, index every name and alias, and add the automatic `help` subcommand."""
     subcommands: dict[str, ResolvedCommand] = {}
     subcommand_names: dict[str, str] = {}
     for sub in spec.subcommands:
@@ -284,39 +365,61 @@ def _build(
     if help_subcommand:
         subcommands["help"] = _build(_HELP_SUBCOMMAND, path, depth + 1, ())
         subcommand_names["help"] = "help"
+    return subcommands, subcommand_names, help_subcommand
 
-    help_arg = next((arg for arg in args if arg.action == "help"), None)
-    return ResolvedCommand(
-        name=spec.name,
-        path=path,
-        about=spec.about,
-        version=spec.version,
-        args=tuple(args),
-        by_id=MappingProxyType(by_id),
-        by_short=MappingProxyType(by_short),
-        by_long=MappingProxyType(by_long),
-        positionals=positionals,
-        arity_mins=arity_mins,
-        required_args=required_args,
-        conflicting_args=conflicting_args,
-        requiring_args=requiring_args,
-        groups=tuple(groups),
-        subcommands=MappingProxyType(subcommands),
-        subcommand_names=MappingProxyType(subcommand_names),
-        help_subcommand=help_subcommand,
-        aliases=spec.aliases,
-        visible_aliases=spec.visible_aliases,
-        inherited=frozenset(arg.id for arg in inherited),
-        subcommand_required=spec.subcommand_required,
-        arg_required_else_help=spec.arg_required_else_help,
-        help_hint=None if help_arg is None else _help_hint(help_arg),
-    )
+
+@dataclass(frozen=True, slots=True)
+class _ValueShape:
+    """How an argument counts and parses its values: the builder-specific part of `ResolvedArg`."""
+
+    min_values: int
+    max_values: int | None
+    parser: ValueParser[Any] | None
+    defaults: tuple[Any, ...]
+    default_missing: tuple[Any, ...]
 
 
 def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
     action = spec.action
     label = f"{where}: argument {spec.id!r}"
     positional = spec.short is None and spec.long is None
+    _check_arg_shape(spec, action, label, positional)
+    shape = (
+        _resolve_value_arg(spec, action, label, positional)
+        if takes_values(action)
+        else _resolve_flag_arg(spec, action, label, positional)
+    )
+    return ResolvedArg(
+        id=spec.id,
+        short=spec.short,
+        long=spec.long,
+        help=spec.help,
+        value_name=spec.value_name or spec.id.upper(),
+        required=spec.required,
+        action=action,
+        min_values=shape.min_values,
+        max_values=shape.max_values,
+        parser=shape.parser,
+        defaults=shape.defaults,
+        defaults_raw=spec.default_values,
+        default_missing=shape.default_missing,
+        env=spec.env,
+        conflicts_with=spec.conflicts_with,
+        requires=spec.requires,
+        allow_hyphen_values=spec.allow_hyphen_values,
+        value_delimiter=spec.value_delimiter,
+        last=spec.last,
+        hide=spec.hide,
+        global_=spec.global_,
+        aliases=spec.aliases,
+        visible_aliases=spec.visible_aliases,
+        short_aliases=spec.short_aliases,
+        visible_short_aliases=spec.visible_short_aliases,
+    )
+
+
+def _check_arg_shape(spec: ArgSpec, action: ArgAction, label: str, positional: bool) -> None:
+    """Alias and global() rules that apply whatever the action is."""
     invariant(
         not positional
         or not (
@@ -334,100 +437,89 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
             action not in ("help", "version"),
             f"{label}: action {action!r} cannot be global; every command gets its own",
         )
-    if takes_values(action):
-        default_arity = (1, None) if positional and action == "append" else (1, 1)
-        min_values, max_values = spec.num_args if spec.num_args is not None else default_arity
-        parser = spec.value_parser if spec.value_parser is not None else _STRING
-        invariant(
-            not (spec.required and spec.default_values),
-            f"{label} is required, so its default value could never be used",
-        )
-        invariant(
-            not spec.default_missing_values or min_values == 0,
-            f"{label}: default_missing_value() needs num_args(0, ...) so the value can be omitted",
-        )
-        invariant(
-            not (positional and spec.value_delimiter is not None),
-            f"{label}: value_delimiter() is only supported on options",
-        )
-        invariant(
-            not spec.last or positional,
-            f"{label}: last() needs a positional argument; give it neither short() nor long()",
-        )
-        invariant(
-            not (spec.last and spec.allow_hyphen_values),
-            f"{label}: allow_hyphen_values() does nothing with last(); "
-            f"every value after '--' is already taken verbatim",
-        )
-        invariant(
-            action == "append" or max_values is None or len(spec.default_values) <= max_values,
-            f"{label}: {len(spec.default_values)} default values, "
-            f"but num_args allows at most {max_values}",
-        )
-        defaults = tuple(_parse_default(parser, raw, label) for raw in spec.default_values)
-        default_missing = tuple(
-            _parse_default(parser, raw, label) for raw in spec.default_missing_values
-        )
-    else:
-        name = f"action {action!r}"
-        invariant(
-            not positional,
-            f"{label}: {name} needs short() or long(); a positional always takes a value",
-        )
-        unused = [
-            method
-            for method, is_set in (
-                ("num_args", spec.num_args is not None),
-                ("value_parser", spec.value_parser is not None),
-                ("default_value", bool(spec.default_values)),
-                ("default_missing_value", bool(spec.default_missing_values)),
-                ("value_delimiter", spec.value_delimiter is not None),
-                ("allow_hyphen_values", spec.allow_hyphen_values),
-                ("value_name", spec.value_name is not None),
-                ("last", spec.last),
-            )
-            if is_set
-        ]
-        invariant(not unused, f"{label}: {', '.join(unused)} does nothing with {name}")
-        invariant(
-            spec.env is None or action in ("set_true", "set_false"),
-            f"{label}: env() does nothing with {name}",
-        )
-        invariant(
-            not (spec.required and action in ("help", "version")),
-            f"{label}: a required {name} argument makes the command unusable",
-        )
-        min_values, max_values = 0, 0
-        parser = None
-        defaults = _FLAG_DEFAULTS.get(action, ())
-        default_missing = ()
-    return ResolvedArg(
-        id=spec.id,
-        short=spec.short,
-        long=spec.long,
-        help=spec.help,
-        value_name=spec.value_name or spec.id.upper(),
-        required=spec.required,
-        action=action,
-        min_values=min_values,
-        max_values=max_values,
-        parser=parser,
-        defaults=defaults,
-        defaults_raw=spec.default_values,
-        default_missing=default_missing,
-        env=spec.env,
-        conflicts_with=spec.conflicts_with,
-        requires=spec.requires,
-        allow_hyphen_values=spec.allow_hyphen_values,
-        value_delimiter=spec.value_delimiter,
-        last=spec.last,
-        hide=spec.hide,
-        global_=spec.global_,
-        aliases=spec.aliases,
-        visible_aliases=spec.visible_aliases,
-        short_aliases=spec.short_aliases,
-        visible_short_aliases=spec.visible_short_aliases,
+
+
+def _resolve_value_arg(
+    spec: ArgSpec,
+    action: ArgAction,
+    label: str,
+    positional: bool,
+) -> _ValueShape:
+    """Resolve a value-taking argument's arity, parser and parsed defaults, panicking on misuse."""
+    default_arity = (1, None) if positional and action == "append" else (1, 1)
+    min_values, max_values = spec.num_args if spec.num_args is not None else default_arity
+    parser = spec.value_parser if spec.value_parser is not None else _STRING
+    invariant(
+        not (spec.required and spec.default_values),
+        f"{label} is required, so its default value could never be used",
     )
+    invariant(
+        not spec.default_missing_values or min_values == 0,
+        f"{label}: default_missing_value() needs num_args(0, ...) so the value can be omitted",
+    )
+    invariant(
+        not (positional and spec.value_delimiter is not None),
+        f"{label}: value_delimiter() is only supported on options",
+    )
+    invariant(
+        not spec.last or positional,
+        f"{label}: last() needs a positional argument; give it neither short() nor long()",
+    )
+    invariant(
+        not (spec.last and spec.allow_hyphen_values),
+        f"{label}: allow_hyphen_values() does nothing with last(); "
+        f"every value after '--' is already taken verbatim",
+    )
+    invariant(
+        action == "append" or max_values is None or len(spec.default_values) <= max_values,
+        f"{label}: {len(spec.default_values)} default values, "
+        f"but num_args allows at most {max_values}",
+    )
+    return _ValueShape(
+        min_values,
+        max_values,
+        parser,
+        tuple(_parse_default(parser, raw, label) for raw in spec.default_values),
+        tuple(_parse_default(parser, raw, label) for raw in spec.default_missing_values),
+    )
+
+
+def _resolve_flag_arg(
+    spec: ArgSpec,
+    action: ArgAction,
+    label: str,
+    positional: bool,
+) -> _ValueShape:
+    """Resolve a flag argument, panicking on any option that would have no effect."""
+    name = f"action {action!r}"
+    invariant(
+        not positional,
+        f"{label}: {name} needs short() or long(); a positional always takes a value",
+    )
+    unused = [
+        method
+        for method, is_set in (
+            ("num_args", spec.num_args is not None),
+            ("value_parser", spec.value_parser is not None),
+            ("default_value", bool(spec.default_values)),
+            ("default_missing_value", bool(spec.default_missing_values)),
+            ("value_delimiter", spec.value_delimiter is not None),
+            ("allow_hyphen_values", spec.allow_hyphen_values),
+            ("value_name", spec.value_name is not None),
+            ("last", spec.last),
+        )
+        if is_set
+    ]
+    invariant(not unused, f"{label}: {', '.join(unused)} does nothing with {name}")
+    invariant(
+        spec.env is None or action in ("set_true", "set_false"),
+        f"{label}: env() does nothing with {name}",
+    )
+    invariant(
+        not (spec.required and action in ("help", "version")),
+        f"{label}: a required {name} argument makes the command unusable",
+    )
+    return _ValueShape(0, 0, None, _FLAG_DEFAULTS.get(action, ()), ())
 
 
 def _parse_default(parser: ValueParser[Any], raw: str, label: str) -> Any:

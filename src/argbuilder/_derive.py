@@ -55,11 +55,11 @@ import dataclasses
 import os
 import re
 import sys
-import weakref
 from dataclasses import MISSING, dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast, dataclass_transform, get_type_hints, overload
 
+from argbuilder._build import MAX_COMMAND_DEPTH
 from argbuilder._command import Command
 from argbuilder._error import Error
 from argbuilder._field import (
@@ -113,11 +113,11 @@ def args(cls: type | None = None, /) -> Any:
 
     def decorate(cls: type) -> type:
         invariant(
-            cls not in _HEADS,
+            not _is_parser_class(cls),
             f"{cls.__qualname__}: decorate with exactly one of @parser or @args",
         )
         _make_dataclass(cls)
-        _ARGS_CLASSES.add(cls)
+        setattr(cls, _ARGS_ATTR, True)
         return cls
 
     return decorate(cls) if cls is not None else decorate
@@ -163,7 +163,7 @@ def parser(
 
     def decorate(cls: type) -> type:
         invariant(
-            cls not in _ARGS_CLASSES,
+            not _is_args_class(cls),
             f"{cls.__qualname__}: decorate with exactly one of @parser or @args",
         )
         # Read before dataclass() fills in a generated signature as the docstring.
@@ -179,12 +179,13 @@ def parser(
             cmd = cmd.alias(alias)
         for alias in _names("visible_aliases", visible_aliases):
             cmd = cmd.visible_alias(alias)
-        _HEADS[cls] = (
+        head = (
             cmd.arg_required_else_help(arg_required_else_help)
             .disable_help_flag(disable_help_flag)
             .disable_version_flag(disable_version_flag)
             .disable_help_subcommand(disable_help_subcommand)
         )
+        setattr(cls, _HEAD_ATTR, head)
         return cls
 
     return decorate(cls) if cls is not None else decorate
@@ -198,13 +199,16 @@ def to_command(cls: type) -> Command:
 
     Parse a modified command and read it back with `from_arg_matches`.
     """
-    invariant(cls in _HEADS, f"to_command(): {cls!r} is not decorated with @parser")
+    invariant(_is_parser_class(cls), f"to_command(): {cls!r} is not decorated with @parser")
     return _command(cls, ())
 
 
 def from_arg_matches[T](cls: type[T], matches: ArgMatches) -> T:
     """Build an instance from matches of `to_command(cls)` (or a command extending it)."""
-    invariant(cls in _HEADS, f"from_arg_matches(): {cls!r} is not decorated with @parser")
+    invariant(
+        _is_parser_class(cls),
+        f"from_arg_matches(): {cls!r} is not decorated with @parser",
+    )
     return _construct(cls, matches)
 
 
@@ -271,20 +275,29 @@ class _Fields:
     """
 
 
-_HEADS: weakref.WeakKeyDictionary[type, Command] = weakref.WeakKeyDictionary()
-"""Each `@parser` class's command without args or subcommands, built at decoration."""
-_ARGS_CLASSES: weakref.WeakSet[type] = weakref.WeakSet()
-"""Classes decorated with `@args`, checked to keep `@parser` and `@args` exclusive."""
-_FIELDS: weakref.WeakKeyDictionary[type, _Fields] = weakref.WeakKeyDictionary()
-_COMMANDS: weakref.WeakKeyDictionary[type, Command] = weakref.WeakKeyDictionary()
+_HEAD_ATTR = "__argbuilder_head__"
+"""Class attribute holding the bare `Command` `@parser` stored at decoration."""
+_ARGS_ATTR = "__argbuilder_args__"
+"""Class attribute marking a class decorated with `@args`."""
+_FIELDS_ATTR = "__argbuilder_fields__"
+"""Class attribute caching the derived `_Fields`, filled on first use."""
+_COMMAND_ATTR = "__argbuilder_command__"
+"""Class attribute caching the full `Command`, filled on first use."""
+
+
+def _head_of(cls: type) -> Command:
+    """The bare command `@parser` stored on `cls` itself, not one it inherits."""
+    return cast("Command", cls.__dict__[_HEAD_ATTR])
 
 
 def _is_parser_class(value: object) -> bool:
-    return isinstance(value, type) and value in _HEADS
+    """True for a class decorated with `@parser`, not one that merely subclasses it."""
+    return isinstance(value, type) and _HEAD_ATTR in value.__dict__
 
 
 def _is_args_class(value: object) -> bool:
-    return isinstance(value, type) and value in _ARGS_CLASSES
+    """True for a class decorated with `@args`, not one that merely subclasses it."""
+    return isinstance(value, type) and _ARGS_ATTR in value.__dict__
 
 
 def _make_dataclass(cls: type) -> None:
@@ -303,22 +316,26 @@ def _fields_of(cls: type) -> tuple[dataclasses.Field[Any], ...]:
 
 
 def _command(cls: type, stack: tuple[type, ...]) -> Command:
-    cached = _COMMANDS.get(cls)
+    cached = cls.__dict__.get(_COMMAND_ATTR)
     if cached is not None:
-        return cached
+        return cast("Command", cached)
     invariant(
         cls not in stack,
         f"{cls.__qualname__}: subcommands form a cycle: "
         f"{' -> '.join(c.__qualname__ for c in (*stack, cls))}",
     )
+    invariant(
+        len(stack) < MAX_COMMAND_DEPTH,
+        f"{cls.__qualname__}: subcommands nest deeper than {MAX_COMMAND_DEPTH} levels",
+    )
     fields = _fields(cls, ())
-    cmd = _HEADS[cls].args(fields.args)
+    cmd = _head_of(cls).args(fields.args)
     sub = fields.subcommand
     if sub is not None:
         cmd = cmd.subcommands(
             _command(member, (*stack, cls)) for member in sub.by_name.values()
         ).subcommand_required(not sub.optional)
-    _COMMANDS[cls] = cmd
+    setattr(cls, _COMMAND_ATTR, cmd)
     return cmd
 
 
@@ -348,13 +365,17 @@ def _resolve_reader(reader: _Reader) -> Callable[[ArgMatches], object]:
 
 
 def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
-    cached = _FIELDS.get(cls)
+    cached = cls.__dict__.get(_FIELDS_ATTR)
     if cached is not None:
-        return cached
+        return cast("_Fields", cached)
     invariant(
         cls not in stack,
         f"{cls.__qualname__}: flattened @args form a cycle: "
         f"{' -> '.join(c.__qualname__ for c in (*stack, cls))}",
+    )
+    invariant(
+        len(stack) < MAX_COMMAND_DEPTH,
+        f"{cls.__qualname__}: flattened @args nest deeper than {MAX_COMMAND_DEPTH} levels",
     )
     try:
         hints = get_type_hints(cls)
@@ -408,12 +429,12 @@ def _fields(cls: type, stack: tuple[type, ...]) -> _Fields:
             args_out.append(built)
             readers.append(reader)
     invariant(
-        subcommand is None or cls in _HEADS,
+        subcommand is None or _is_parser_class(cls),
         f"{cls.__qualname__}: an @args class cannot hold a subcommand; use @parser",
     )
     plan = tuple((reader.field, _resolve_reader(reader)) for reader in readers)
     result = _Fields(tuple(args_out), subcommand, tuple(readers), plan)
-    _FIELDS[cls] = result
+    setattr(cls, _FIELDS_ATTR, result)
     return result
 
 
@@ -435,7 +456,7 @@ def _subcommand_field(
     )
     by_name: dict[str, type] = {}
     for member in cast("Sequence[type]", members):
-        name = _HEADS[member].get_name()
+        name = _head_of(member).get_name()
         taken = by_name.get(name)
         invariant(
             taken is None,

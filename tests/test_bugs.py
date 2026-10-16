@@ -361,8 +361,26 @@ def test_argv_misuse() -> None:
 def test_env_misuse() -> None:
     with panics("mapping of str to str"):
         Command("x").try_get_matches_from(["x"], env=None)  # ty: ignore[invalid-argument-type]
+    # Only the variables a command actually reads are checked; a non-str value
+    # for a declared env() variable is still a bug.
     with panics("mapping of str to str"):
-        Command("x").try_get_matches_from(["x"], env={"A": 1})  # ty: ignore[invalid-argument-type]
+        Command("x").arg(Arg("a").long("a").env("A")).try_get_matches_from(
+            ["x"],
+            env={"A": 1},  # ty: ignore[invalid-argument-type]
+        )
+    # A subcommand's env() variable is in the same checked set, so an outer
+    # parse still catches it.
+    with panics("mapping of str to str"):
+        Command("x").subcommand(
+            Command("run").arg(Arg("p").long("p").env("P"))
+        ).try_get_matches_from(
+            ["x", "run"],
+            env={"P": 1},  # ty: ignore[invalid-argument-type]
+        )
+    # A key no argument reads is never followed, so a large environment costs
+    # nothing per parse; see `_check_env`.
+    unused = Command("x").try_get_matches_from(["x"], env={"UNUSED": 1})  # ty: ignore[invalid-argument-type]
+    assert isinstance(unused, ArgMatches)
 
 
 # -- reading matches wrong ------------------------------------------------------
