@@ -145,6 +145,15 @@ def test_matches_error_uses_the_subcommand_usage(golden: Callable[[str, str], No
     golden("error_subcommand_usage", error.render())
 
 
+def test_error_exit_is_the_process_edge(capsys: pytest.CaptureFixture[str]) -> None:
+    # `Error.exit()` delegates the stream choice and the exit code to `_cli`.
+    error = CMD.error(ValueValidation(), "boom")
+    with pytest.raises(SystemExit) as exited:
+        error.exit()
+    assert exited.value.code == 2
+    assert "error: boom" in capsys.readouterr().err
+
+
 def test_get_matches_from_exits(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         CMD.get_matches_from(["tool"])

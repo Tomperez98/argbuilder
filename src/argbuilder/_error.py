@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NoReturn
 
 from argbuilder._invariant import check_variant, invariant, variant_classes
-from argbuilder._style import PLAIN, Style, terminal_style
+from argbuilder._style import PLAIN, Style
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -188,6 +187,15 @@ def _where(argument: str, env: str | None) -> str:
     return f"'{argument}'" + ("" if env is None else f" (from environment variable {env})")
 
 
+def _is_display(kind: ErrorKind) -> bool:
+    """Help and version go to stdout with exit 0; every other kind is an error on stderr.
+
+    The one classification `exit_code` and `use_stderr` both read, so the two
+    cannot drift apart when a kind is added.
+    """
+    return isinstance(kind, DisplayHelp | DisplayVersion)
+
+
 @dataclass(frozen=True, slots=True)
 class Error:
     """Parsing did not produce matches. A returned value, not an exception.
@@ -212,11 +220,11 @@ class Error:
 
     @property
     def exit_code(self) -> int:
-        return 0 if isinstance(self.kind, DisplayHelp | DisplayVersion) else 2
+        return 0 if _is_display(self.kind) else 2
 
     @property
     def use_stderr(self) -> bool:
-        return not isinstance(self.kind, DisplayHelp | DisplayVersion)
+        return not _is_display(self.kind)
 
     def render(self, style: Style = PLAIN) -> str:
         """The text `exit()` prints. Plain unless you pass a `Style`."""
@@ -235,8 +243,11 @@ class Error:
         return "\n\n".join(blocks) + "\n"
 
     def exit(self) -> NoReturn:
-        """The edge: print to the right stream, styled for it, and exit with the right code."""
-        stream = sys.stderr if self.use_stderr else sys.stdout
-        stream.write(self.render(terminal_style(stream)))
-        stream.flush()
-        sys.exit(self.exit_code)
+        """Print to the right stream, styled for it, and exit with the right code.
+
+        The IO lives in `_cli.exit_with`; importing it inside the method keeps
+        this data module free of a module-level dependency on the process edge.
+        """
+        from argbuilder._cli import exit_with
+
+        exit_with(self)

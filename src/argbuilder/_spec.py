@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 from argbuilder._invariant import bug
 from argbuilder._suggest import suggest
@@ -26,9 +26,8 @@ ARG_ACTIONS: tuple[ArgAction, ...] = get_args(ArgAction.__value__)
 
 def check_action(owner: str, value: object) -> ArgAction:
     """Panic unless `value` is one of `ArgAction`'s strings, suggesting the closest."""
-    for action in ARG_ACTIONS:
-        if value == action:
-            return action
+    if value in ARG_ACTIONS:
+        return cast("ArgAction", value)
     close = suggest(str(value).lower(), ARG_ACTIONS)
     hint = f"; did you mean {close!r}?" if close else ""
     bug(f"{owner}.action() takes one of {', '.join(ARG_ACTIONS)}, got {value!r}{hint}")

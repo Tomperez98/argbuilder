@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from argbuilder._help import usage_error
 from argbuilder._invariant import bug, invariant
@@ -197,11 +197,20 @@ class ArgMatches:
         return cached
 
 
+def _holds[T](value: object, type_: type[T]) -> TypeGuard[T]:
+    """Whether `value` is an instance of `type_`, treating `bool` as its own type.
+
+    `isinstance` lets subclasses through on purpose (a parser may return a
+    `PosixPath` for `Path`), but `bool` is an `int` subclass, so asking for
+    `int` must not quietly accept a flag value.
+    """
+    if isinstance(value, bool) and type_ not in (bool, object):
+        return False
+    return isinstance(value, type_)
+
+
 def _checked[T](id: str, value: object, type_: type[T]) -> T:
-    # `isinstance` lets subclasses through on purpose (a parser may return a
-    # `PosixPath` for `Path`), but `bool` is an `int` subclass, so asking for
-    # `int` must not quietly accept a flag value.
-    if isinstance(value, type_) and not (isinstance(value, bool) and type_ not in (bool, object)):
+    if _holds(value, type_):
         return value
     bug(
         f"argument {id!r} holds {type(value).__name__}, not {type_.__name__}; "

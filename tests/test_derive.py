@@ -530,3 +530,50 @@ def test_undecorated_class_panics_on_the_entry_points() -> None:
         to_command(Bad)
     with panics(r"from_arg_matches\(\): .* is not decorated with @parser"):
         from_arg_matches(Bad, None)  # ty: ignore[invalid-argument-type]
+
+
+def test_decoration_is_not_inherited_by_a_subclass() -> None:
+    # The `@parser` marker lives on the class itself, so a plain subclass is not
+    # itself a command until it is decorated too.
+    class Base:
+        pass
+
+    decorated = parser_deco(Base)
+
+    class Child(decorated):
+        pass
+
+    assert to_command(decorated).get_name() == "base"
+    with panics(r"to_command\(\): .* is not decorated with @parser"):
+        to_command(Child)
+
+
+def test_derive_subcommand_depth_is_bounded() -> None:
+    # A chain of @parser classes deeper than MAX_COMMAND_DEPTH panics with the
+    # same named limit as the builder, instead of exhausting Python's stack in
+    # `_command` (a 1200-deep chain raised RecursionError before this bound).
+    inner: type | None = None
+    for level in range(40):
+        cls = type(f"Depth{level}", (), {})
+        cls.__annotations__ = {} if inner is None else {"child": inner}
+        parser_deco(cls)
+        inner = cls
+    assert inner is not None
+    with panics("subcommands nest deeper than 32"):
+        to_command(inner)
+
+
+def test_derive_flattened_args_depth_is_bounded() -> None:
+    # Flattened @args recurse too; the bound turns a deep chain into the named
+    # panic instead of a RecursionError from `_fields`.
+    inner: type | None = None
+    for level in range(40):
+        group = type(f"Flat{level}", (), {})
+        group.__annotations__ = {} if inner is None else {"group": inner}
+        args(group)
+        inner = group
+    root = type("FlatRoot", (), {})
+    root.__annotations__ = {"group": inner}
+    parser_deco(root)
+    with panics("flattened @args nest deeper than 32"):
+        to_command(root)

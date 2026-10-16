@@ -327,14 +327,23 @@ def test_possible_values_error_and_tip() -> None:
 
 
 def test_choices_accept_a_set_or_frozenset() -> None:
-    # A set is a natural spelling of "one of these"; help lists its members in
-    # an arbitrary order, but the set of accepted values is the same.
+    # A set is a natural spelling of "one of these"; the accepted values are the
+    # same, and the listed order is sorted so help and errors are reproducible
+    # across processes (a set's iteration order is not).
     for accepted in ({"fast", "safe"}, frozenset({"fast", "safe"})):
         parser = Arg("mode").value_parser(accepted)._spec.value_parser  # noqa: SLF001
         assert parser is not None
-        assert sorted(parser.possible_values) == ["fast", "safe"]
+        assert parser.possible_values == ("fast", "safe")
         assert parser.parse("safe") == "safe"
         assert isinstance(parser.parse("other"), Invalid)
+
+
+def test_set_possible_values_are_sorted_not_hash_ordered() -> None:
+    # Regression: iterating a set leaked its hash order into help and errors, so
+    # one definition rendered differently under different PYTHONHASHSEED values.
+    parser = Arg("mode").value_parser({"gamma", "alpha", "delta", "beta"})._spec  # noqa: SLF001
+    assert parser.value_parser is not None
+    assert parser.value_parser.possible_values == ("alpha", "beta", "delta", "gamma")
 
 
 def test_custom_parser_returning_invalid() -> None:

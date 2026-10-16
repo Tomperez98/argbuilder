@@ -175,7 +175,9 @@ def into_value_parser(like: object) -> ValueParser[Any]:
             f"pass a list of possible values like [{like!r}]",
         )
     if isinstance(like, (set, frozenset)):
-        return ValueParser.choices(*like)
+        # A set's iteration order is hash-randomized, so sort it: help and error
+        # text list possible values in this order and must not vary per process.
+        return ValueParser.choices(*sorted(like))
     if like is bool:
         return ValueParser.boolean()
     if like is int:

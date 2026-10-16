@@ -14,7 +14,7 @@ from argbuilder._build import build
 from argbuilder._docs import render_markdown
 from argbuilder._error import Error, ErrorKind
 from argbuilder._help import render_help, render_usage, render_version, usage_error
-from argbuilder._invariant import invariant
+from argbuilder._invariant import bug, invariant
 from argbuilder._parser import parse
 from argbuilder._spec import CommandSpec
 from argbuilder._style import PLAIN, Style
@@ -202,16 +202,9 @@ class Command:
             all(isinstance(token, str) for token in tokens),
             "argv must hold str",
         )
-        invariant(
-            isinstance(env, Mapping)
-            and all(
-                isinstance(name, str) and isinstance(value, str) for name, value in env.items()
-            ),
-            # The message is static on purpose: an f-string here would repr the
-            # whole environment (hundreds of vars) on every parse, win or lose.
-            "env must be a mapping of str to str",
-        )
-        return parse(self._resolved(), tokens[1:], env)
+        resolved = self._resolved()
+        _check_env(env, resolved.env_names)
+        return parse(resolved, tokens[1:], env)
 
     def get_matches_from(self, argv: Iterable[str], env: Mapping[str, str] = _NO_ENV) -> ArgMatches:
         """Like `try_get_matches_from`, but print the error and exit on failure."""
@@ -258,6 +251,22 @@ class Command:
         prefer `ArgMatches.error()` on that subcommand's matches.
         """
         return usage_error(self._resolved(), kind, message)
+
+
+def _check_env(env: Mapping[str, str], names: frozenset[str]) -> None:
+    """Panic unless `env` is a mapping and every variable the command reads is a str.
+
+    Only `names` are read: the variables this command or a subcommand declares
+    with `env()`. Scanning the whole mapping every parse is O(env) work over
+    values no argument follows, so an unused key is left alone.
+    """
+    if not isinstance(env, Mapping):
+        bug("env must be a mapping of str to str")
+    for name in names:
+        value = env.get(name, "")
+        if not isinstance(value, str):
+            # Built only on the failing branch, so a large env costs nothing on success.
+            bug(f"env must be a mapping of str to str: {name!r} is {value!r}")
 
 
 def _check_name(what: str, name: object) -> str:
