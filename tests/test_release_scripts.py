@@ -51,6 +51,7 @@ def _load(name: str) -> ModuleType:
 
 
 release = _load("release")
+compat = _load("compat")
 
 
 def test_entries_are_split_by_version_heading() -> None:
@@ -76,3 +77,50 @@ def test_shipped_changelog_covers_the_current_version() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     source = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert release.changelog_entry(source, project["project"]["version"]) is not None
+
+
+def test_diff_base_is_shortened_for_display() -> None:
+    assert compat.short_ref("0123456789abcdef0123456789abcdef01234567") == "0123456"
+    assert compat.short_ref("v1.1.1") == "v1.1.1"
+
+
+def test_no_previous_contract_is_baseline_not_additive() -> None:
+    label = compat.label_for(
+        shape_ok=True, behavior_ok=True, added=set(), removed=set(), has_previous=False
+    )
+    assert label == "baseline"
+
+
+def test_promises_added_by_this_change_are_additive() -> None:
+    label = compat.label_for(
+        shape_ok=True, behavior_ok=True, added={"p"}, removed=set(), has_previous=True
+    )
+    assert label == "additive"
+
+
+def test_a_failing_check_beats_baseline() -> None:
+    label = compat.label_for(
+        shape_ok=False, behavior_ok=True, added=set(), removed=set(), has_previous=False
+    )
+    assert label == "breaking"
+
+
+def test_baseline_does_not_block() -> None:
+    assert compat.severity("baseline", declared=False) is None
+
+
+def test_baseline_summary_names_the_diff_base() -> None:
+    verdict = compat.Verdict(
+        baseline="v1.1.0",
+        diff_base="0123456789abcdef0123456789abcdef01234567",
+        mode="v1.1.0 shipped no contract; today's spec judged its PyPI wheel (bootstrap)",
+        shape_ok=True,
+        behavior_ok=True,
+        has_previous=False,
+        added=set(),
+        removed=set(),
+        version="1.1.1",
+    )
+    text = verdict.summary()
+    assert text.startswith("## Contract: baseline")
+    assert "No contract at 0123456" in text

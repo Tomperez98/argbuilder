@@ -52,7 +52,7 @@ jobs:
             exit 1
           fi
           case "$label" in
-            unchanged | additive | changed | breaking) ;;
+            unchanged | additive | changed | breaking | baseline) ;;
             *) echo "::error::unknown label '$label'"; exit 1 ;;
           esac
           # The report must describe the pull request's current head; an
@@ -83,7 +83,8 @@ jobs:
           gh label create "contract: additive" --force --color 1d76db --description "New promises only; one spec owner approves"
           gh label create "contract: changed" --force --color fbca04 --description "Promises reworded or removed, previous contract still green"
           gh label create "contract: breaking" --force --color d93f0b --description "The previous release's contract rejects this build"
-          for other in unchanged additive changed breaking; do
+          gh label create "contract: baseline" --force --color 5319e7 --description "No earlier contract to compare against; the first contract on record"
+          for other in unchanged additive changed breaking baseline; do
             if [ "$other" != "$label" ]; then
               gh pr edit "$pr" --remove-label "contract: $other" 2>/dev/null || true
             fi

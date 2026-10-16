@@ -13,12 +13,20 @@ also needs the release tags (`git fetch --tags`).
   no contract is bootstrapped instead: today's spec judges its published
   wheel, and green means today's spec describes what users already have.
 
-It labels the change (unchanged / additive / changed / breaking), writes the
-label and a summary to .contract-compat/report/ (and the job summary on CI),
-and fails only on an undeclared break: the baseline's contract rejects this
-build and the major version didn't go up (ship skill, COMPAT.md rule 6). A
-declared break must also carry a breaking entry in CHANGELOG.md, and the
-current version must have a section there at all.
+The promise diff, by contrast, compares against the change's own base commit
+(`CONTRACT_DIFF_BASE`: the pull request's base, or the pushed-before commit),
+not the baseline release: the report says what *this* change did to the
+contract, not everything merged since the last release (ship skill, CI.md
+rule 10). A release compares against the release before it. A change with no
+contract at its diff base is labeled `baseline` -- the first contract on
+record -- rather than `additive`.
+
+It labels the change (unchanged / additive / changed / breaking / baseline),
+writes the label and a summary to .contract-compat/report/ (and the job
+summary on CI), and fails only on an undeclared break: the baseline's
+contract rejects this build and the major version didn't go up (ship skill,
+COMPAT.md rule 6). A declared break must also carry a breaking entry in
+CHANGELOG.md, and the current version must have a section there at all.
 """
 
 from __future__ import annotations
@@ -46,7 +54,7 @@ from release import (
     say,
 )
 
-type Label = Literal["unchanged", "additive", "changed", "breaking"]
+type Label = Literal["unchanged", "additive", "changed", "breaking", "baseline"]
 type Severity = Literal["error", "warning", "notice"]
 
 CONTRACT = ROOT / "contract"
@@ -79,9 +87,23 @@ def promises(source: str) -> set[str]:
     return {text for text in LITERAL.findall(source) if "→" in text}
 
 
-def label_for(*, shape_ok: bool, behavior_ok: bool, added: set[str], removed: set[str]) -> Label:
+def short_ref(ref: str) -> str:
+    """A ref for display: a full commit SHA shortened, a tag or name left alone."""
+    return ref[:7] if re.fullmatch(r"[0-9a-f]{40}", ref) else ref
+
+
+def label_for(
+    *,
+    shape_ok: bool,
+    behavior_ok: bool,
+    added: set[str],
+    removed: set[str],
+    has_previous: bool,
+) -> Label:
     if not (shape_ok and behavior_ok):
         return "breaking"
+    if not has_previous:
+        return "baseline"
     if removed:
         return "changed"
     if added:
@@ -105,16 +127,18 @@ def severity(label: Label, *, declared: bool) -> Severity | None:
             return "notice" if declared else "error"
         case "changed":
             return "warning"
-        case "unchanged" | "additive":
+        case "unchanged" | "additive" | "baseline":
             return None
 
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
     baseline: str
+    diff_base: str
     mode: str
     shape_ok: bool
     behavior_ok: bool
+    has_previous: bool
     added: set[str]
     removed: set[str]
     version: str
@@ -127,6 +151,7 @@ class Verdict:
             behavior_ok=self.behavior_ok,
             added=self.added,
             removed=self.removed,
+            has_previous=self.has_previous,
         )
 
     @property
@@ -148,6 +173,14 @@ class Verdict:
                 f"behavior: **{word(self.behavior_ok)}** ({self.mode})."
             ),
         ]
+        if self.label == "baseline":
+            lines += [
+                "",
+                (
+                    f"No contract at {short_ref(self.diff_base)} to compare against; "
+                    "this change records the first one."
+                ),
+            ]
         if self.label == "breaking":
             lines.append("")
             lines.append(
@@ -157,7 +190,7 @@ class Verdict:
                 "(`uv version --bump major`) and describe the migration in the release notes."
             )
         if self.added or self.removed:
-            lines += ["", "```diff"]
+            lines += ["", f"Promises changed since {short_ref(self.diff_base)}:", "```diff"]
             lines += [f'- "{text}"' for text in sorted(self.removed)]
             lines += [f'+ "{text}"' for text in sorted(self.added)]
             lines.append("```")
@@ -170,6 +203,30 @@ class Verdict:
 def annotate(level: Severity, message: str) -> None:
     on_ci = os.environ.get("GITHUB_ACTIONS") == "true"
     sys.stderr.write(f"::{level}::{message}\n" if on_ci else f"{level}: {message}\n")
+
+
+def spec_at(ref: str) -> str | None:
+    """The spec text at `ref`; None means the ref exists but shipped no contract.
+
+    A ref that does not resolve at all is a broken precondition: the checkout
+    needs the base of the change it judges.
+    """
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{ref}^{{commit}}"],  # noqa: S607 - fixed git argv
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if exists.returncode != 0:
+        fail(f"{ref} is not a commit in this checkout; fetch the full history")
+    shown = subprocess.run(
+        ["git", "show", f"{ref}:{SPEC}"],  # noqa: S607 - fixed git argv
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return shown.stdout if shown.returncode == 0 else None
 
 
 def run(*argv: str, cwd: Path = ROOT) -> bool:
@@ -219,6 +276,13 @@ def cmd_compat() -> None:
     if baseline is None:
         fail("no release tag before HEAD; fetch them with `git fetch --tags`")
 
+    # The promise diff compares against the change's own base, so the report
+    # describes what this change did to the contract (CI.md rule 10), not
+    # everything merged since the last release. A release compares against the
+    # release before it (COMPAT.md rule 5); everything else uses the base commit
+    # GitHub reports for the change, falling back to the release.
+    diff_base = baseline if release else (os.environ.get("CONTRACT_DIFF_BASE") or baseline)
+
     shutil.rmtree(WORK, ignore_errors=True)
     REPORT.mkdir(parents=True)
 
@@ -228,14 +292,8 @@ def cmd_compat() -> None:
         "--search", "src", "--against", baseline,
     )  # fmt: skip
 
-    old_spec = subprocess.run(
-        ["git", "show", f"{baseline}:{SPEC}"],  # noqa: S607 - fixed git argv
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if old_spec.returncode == 0:
+    baseline_spec = spec_at(baseline)
+    if baseline_spec is not None:
         mode = f"{baseline}'s contract judged this build"
         say(f"== behavior: {mode}")
         tree = WORK / "baseline"
@@ -250,15 +308,23 @@ def cmd_compat() -> None:
         python = install_release(baseline.removeprefix("v"), WORK / "venv")
         behavior_ok = judge(CONTRACT, python, WORK)
 
-    old = promises(old_spec.stdout) if old_spec.returncode == 0 else set()
+    old_spec = spec_at(diff_base)
+    has_previous = old_spec is not None
+    old = promises(old_spec) if has_previous else set()
     new = promises((ROOT / SPEC).read_text())
+    if has_previous:
+        say(f"== promises: {len(new - old)} added, {len(old - new)} removed since {diff_base}")
+    else:
+        say(f"== promises: no contract at {diff_base} to compare against")
     verdict = Verdict(
         baseline=baseline,
+        diff_base=diff_base,
         mode=mode,
         shape_ok=shape_ok,
         behavior_ok=behavior_ok,
-        added=new - old,
-        removed=old - new,
+        has_previous=has_previous,
+        added=(new - old) if has_previous else set(),
+        removed=(old - new) if has_previous else set(),
         version=tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"],
     )
 
@@ -290,7 +356,10 @@ def cmd_compat() -> None:
         case "notice":
             annotate("notice", f"declared break against {baseline}: describe the migration")
         case "warning":
-            annotate("warning", f"promises changed against {baseline}; a spec owner reviews")
+            annotate(
+                "warning",
+                f"promises changed since {short_ref(verdict.diff_base)}; a spec owner reviews",
+            )
         case None:
             pass
 
