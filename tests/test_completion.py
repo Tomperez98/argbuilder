@@ -484,6 +484,101 @@ def test_allow_hyphen_value_stays_a_value() -> None:
     assert cmd.complete(["p", "--name", "-x"]).directive == CompletionDirective()
 
 
+def test_allow_negative_numbers_treats_a_numeric_token_as_a_value() -> None:
+    option = Command("p").arg(
+        Arg("offset").long("offset").value_parser(int).allow_negative_numbers(True),
+    )
+    # A negative partial still gets value completion, not flag completion.
+    assert option.complete(["p", "--offset", "-5"]).directive == CompletionDirective()
+
+    positional = Command("p").arg(
+        Arg("n").value_parser(["-5", "-6"]).allow_negative_numbers(True),
+    )
+    assert values(positional.complete(["p", "-5"])) == ("-5",)
+    assert values(positional.complete(["p", "-5", ""])) == ("--help", "-h")
+
+
+def test_allow_negative_numbers_completion_accepts_partial_numerics() -> None:
+    option = Command("p").arg(
+        Arg("offset").long("offset").allow_negative_numbers(True).value_parser(float),
+    )
+    assert option.complete(["p", "--offset", "-1."]).directive == CompletionDirective()
+    assert option.complete(["p", "--offset", "-1e"]).directive == CompletionDirective()
+
+    positional = Command("p").arg(
+        Arg("n").allow_negative_numbers(True).value_hint("file"),
+    )
+    assert positional.complete(["p", "-1."]).directive == CompletionDirective(filter_files=True)
+
+
+def test_a_numeric_token_still_completes_as_a_short_option_when_not_opted_in() -> None:
+    cmd = Command("p").arg(Arg("five").short("5").action("set_true"))
+    assert values(cmd.complete(["p", "-5"])) == ("-5",)
+
+
+def test_allow_negative_numbers_does_not_claim_other_hyphen_tokens() -> None:
+    cmd = Command("p").arg(
+        Arg("n").allow_negative_numbers(True).value_hint("file"),
+    )
+    # `-x` is a flag-shaped token, so it gets option completion, not file values.
+    assert cmd.complete(["p", "-x"]).directive == CompletionDirective(no_file=True)
+    assert cmd.complete(["p", "-5"]).directive == CompletionDirective(filter_files=True)
+
+
+def test_trailing_var_arg_completion_switches_after_the_first_value() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("verbose").long("verbose").action("set_true"))
+        .arg(
+            Arg("cmd").num_args(1, None).trailing_var_arg(True).value_parser(["cargo", "rustc"]),
+        )
+    )
+    # Before the trailing positional starts, flags and its choices are offered.
+    before = values(cmd.complete(["p", ""]))
+    assert "--verbose" in before
+    assert "cargo" in before
+
+    # After it starts, only values remain: no flags, no `--` separator.
+    after = values(cmd.complete(["p", "cargo", ""]))
+    assert after == ("cargo", "rustc")
+    assert values(cmd.complete(["p", "cargo", "build", ""])) == ("cargo", "rustc")
+    assert "--verbose" not in after
+    assert "--verbose" not in values(cmd.complete(["p", "cargo", "--v"]))
+    assert "--help" not in values(cmd.complete(["p", "cargo", "--"]))
+
+
+def test_trailing_var_arg_completion_keeps_path_hints() -> None:
+    cmd = Command("p").arg(
+        Arg("cmd").num_args(1, None).trailing_var_arg(True).value_hint("file"),
+    )
+    assert cmd.complete(["p", "cargo", ""]).directive == CompletionDirective(filter_files=True)
+
+
+def test_require_equals_does_not_treat_the_next_word_as_a_value() -> None:
+    cmd = (
+        Command("p")
+        .arg(
+            Arg("color").long("color").num_args(0, 1).value_parser(["always"]).require_equals(True),
+        )
+        .arg(Arg("rest"))
+    )
+    # `--color` is complete; `always` is not a value the user can type next.
+    assert "always" not in values(cmd.complete(["p", "--color", ""]))
+    assert "always" not in values(cmd.complete(["p", "--color", "a"]))
+    # The `=` spelling still offers choices while the `=` word is being typed.
+    assert "--color=always" in values(cmd.complete(["p", "--color="]))
+
+    short = (
+        Command("p")
+        .arg(
+            Arg("color").short("c").num_args(0, 1).value_parser(["always"]).require_equals(True),
+        )
+        .arg(Arg("rest"))
+    )
+    assert "always" not in values(short.complete(["p", "-c", ""]))
+    assert "-c=always" in values(short.complete(["p", "-c="]))
+
+
 def test_root_cannot_be_hidden() -> None:
     with pytest.raises(AssertionError, match=r"hide\(\) only applies to subcommands"):
         Command("p").hide(True).debug_assert()

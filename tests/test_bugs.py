@@ -74,6 +74,23 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: Arg("x").short_alias("xy"), r"short_alias\(\) takes one character"),
     (lambda: Arg("x").global_(1), r"global_\(\) takes a bool"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").last(1), r"last\(\) takes a bool"),  # ty: ignore[invalid-argument-type]
+    (
+        lambda: Arg("x").trailing_var_arg(1),  # ty: ignore[invalid-argument-type]
+        r"trailing_var_arg\(\) takes a bool",
+    ),
+    (
+        lambda: Command("x").args_conflicts_with_subcommands(1),  # ty: ignore[invalid-argument-type]
+        r"args_conflicts_with_subcommands\(\) takes a bool",
+    ),
+    (lambda: Arg("x").exclusive(1), r"exclusive\(\) takes a bool"),  # ty: ignore[invalid-argument-type]
+    (
+        lambda: Arg("x").required_if_eq("y", 1),  # ty: ignore[invalid-argument-type]
+        r"required_if_eq\(\) takes a str value",
+    ),
+    (
+        lambda: Arg("x").overrides_with_all(5),  # ty: ignore[invalid-argument-type]
+        r"overrides_with_all\(\) takes an iterable",
+    ),
     (lambda: Command("x").visible_alias("a b"), r"visible_alias\(\) must be"),
 ]
 
@@ -168,8 +185,38 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         "num_args",
     ),
     (
+        Command("x").arg(Arg("f").long("f").action("set_true").require_equals(True)),
+        "require_equals does nothing",
+    ),
+    (
+        Command("x").arg(Arg("f").long("f").action("set_true").allow_negative_numbers(True)),
+        "allow_negative_numbers does nothing",
+    ),
+    (
+        Command("x")
+        .arg(Arg("n").long("n").allow_negative_numbers(True))
+        .arg(Arg("five").short("5").action("set_true")),
+        "collides with allow_negative_numbers",
+    ),
+    (
+        Command("x").arg(Arg("a").require_equals(True)),
+        "needs short\\(\\) or long\\(\\)",
+    ),
+    (
+        Command("x").arg(Arg("a").long("a").num_args(2, 2).require_equals(True)),
+        "at most one value",
+    ),
+    (
+        Command("x").arg(Arg("a").long("a").num_args(1, None).require_equals(True)),
+        "at most one value",
+    ),
+    (
         Command("x").arg(Arg("f").long("f").action("set_true").default_value("true")),
         "default_value does nothing",
+    ),
+    (
+        Command("x").arg(Arg("a").long("a").num_args(0, None).require_equals(True)),
+        "at most one value",
     ),
     (
         Command("x").arg(Arg("f").action("set_true")),
@@ -192,9 +239,89 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         "unknown argument 'nope'",
     ),
     (Command("x").arg(Arg("a").long("a").requires("a")), "refers to itself"),
+    (Command("x").arg(Arg("a").long("a").overrides_with("a")), "refers to itself"),
+    (
+        Command("x").arg(Arg("a").long("a").overrides_with("nope")),
+        "unknown argument 'nope'",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").overrides_with("b").conflicts_with("b"))
+        .arg(Arg("b").long("b")),
+        "both overrides and conflicts",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").overrides_with("b"))
+        .arg(Arg("b").long("b").global_(True)),
+        "share the same scope",
+    ),
+    (Command("x").arg(Arg("a").exclusive(True)), r"exclusive\(\) needs short\(\) or long\(\)"),
+    (
+        Command("x")
+        .arg(Arg("a").required_unless_present("b").required_if_eq("b", "1"))
+        .arg(Arg("b").long("b")),
+        "combines required_unless_present",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").required(True).required_unless_present("b"))
+        .arg(Arg("b").long("b")),
+        "both required",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").required_unless_present("b").default_value("x"))
+        .arg(Arg("b").long("b")),
+        "conditional requirement could never apply",
+    ),
+    (
+        Command("x").arg(Arg("a").required_unless_present("nope")),
+        "unknown argument 'nope'",
+    ),
+    (
+        Command("x").arg(Arg("a").required_unless_present("a")),
+        "refers to itself",
+    ),
+    (
+        Command("x").arg(Arg("a").required_if_eq("nope", "1")),
+        "unknown argument 'nope'",
+    ),
+    (
+        Command("x").arg(Arg("a").required_if_eq("a", "1")),
+        "refers to itself",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").required_if_eq("b", "1").global_(True))
+        .arg(Arg("b").long("b")),
+        "not global",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").required_if_eq("b", "1"))
+        .arg(Arg("b").long("b").action("set_true")),
+        "does not take a value",
+    ),
     (Command("x").group(ArgGroup("g").arg("nope")), "unknown argument 'nope'"),
     (Command("x").arg(Arg("g")).group(ArgGroup("g").arg("g")), "already used"),
     (Command("x").subcommand_required(True), "no subcommands"),
+    (
+        Command("x")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("message").required(True))
+        .subcommand(Command("sub")),
+        "could never be used",
+    ),
+    (
+        Command("x")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("a"))
+        .arg(Arg("b"))
+        .group(ArgGroup("g").args(["a", "b"]).required(True))
+        .subcommand(Command("sub")),
+        "could never be used",
+    ),
     (Command("x").subcommand(Command("a")).subcommand(Command("a")), "more than once"),
     (Command("x").arg(Arg("v").long("v").action("version")), "has no version"),
     (
@@ -261,6 +388,32 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
     (
         Command("x").arg(Arg("a").last(True).allow_hyphen_values(True)),
         "allow_hyphen_values\\(\\) does nothing with last\\(\\)",
+    ),
+    (
+        Command("x").arg(Arg("a").long("a").num_args(1, None).trailing_var_arg(True)),
+        "trailing_var_arg\\(\\) needs a positional",
+    ),
+    (
+        Command("x").arg(
+            Arg("a").num_args(1, None).last(True).trailing_var_arg(True),
+        ),
+        "different syntaxes",
+    ),
+    (
+        Command("x").arg(
+            Arg("a").num_args(1, None).allow_hyphen_values(True).trailing_var_arg(True),
+        ),
+        "does nothing with trailing_var_arg",
+    ),
+    (
+        Command("x").arg(Arg("a").num_args(1, 1).trailing_var_arg(True)),
+        "unbounded num_args",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").num_args(1, None).trailing_var_arg(True))
+        .arg(Arg("b").num_args(1, None).trailing_var_arg(True)),
+        "more than one positional",
     ),
 ]
 

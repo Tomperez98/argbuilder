@@ -21,12 +21,14 @@ from argbuilder import (
     InvalidValue,
     MissingRequiredArgument,
     MissingSubcommand,
+    SubcommandConflict,
     TooFewValues,
     TooManyValues,
     UnknownArgument,
     ValueParser,
     ValueSource,
 )
+from argbuilder._spec import is_negative_number
 
 
 def ok(cmd: Command, *args: str, env: dict[str, str] | None = None) -> ArgMatches:
@@ -172,6 +174,431 @@ def test_last_usage_and_error_naming_show_the_double_dash() -> None:
     assert "-- <REST>..." in error.message
 
 
+TRAILING = Command("prog").arg(
+    Arg("command").num_args(1, None).required(True).trailing_var_arg(True),
+)
+
+
+def test_trailing_var_arg_takes_every_token_without_double_dash() -> None:
+    matches = ok(TRAILING, "cargo", "build", "--release", "-j8")
+    assert matches.get_many("command", str) == ("cargo", "build", "--release", "-j8")
+
+
+def test_trailing_var_arg_parses_options_before_it_starts() -> None:
+    cmd = (
+        Command("prog")
+        .arg(Arg("verbose").short("v").action("count"))
+        .arg(Arg("command").num_args(1, None).trailing_var_arg(True))
+    )
+    matches = ok(cmd, "-v", "cargo", "build", "--release")
+    assert matches.get_count("verbose") == 1
+    assert matches.get_many("command", str) == ("cargo", "build", "--release")
+
+
+def test_trailing_var_arg_starts_after_a_double_dash_separator() -> None:
+    assert ok(TRAILING, "--", "cargo", "build").get_many("command", str) == (
+        "cargo",
+        "build",
+    )
+
+
+def test_trailing_var_arg_keeps_a_later_double_dash_as_a_value() -> None:
+    assert ok(TRAILING, "cargo", "--", "--release").get_many("command", str) == (
+        "cargo",
+        "--",
+        "--release",
+    )
+
+
+def test_trailing_var_arg_still_allows_a_subcommand_before_it_starts() -> None:
+    cmd = (
+        Command("prog")
+        .arg(Arg("command").num_args(1, None).trailing_var_arg(True))
+        .subcommand(Command("sub").arg(Arg("x")))
+    )
+    matches = ok(cmd, "sub", "value")
+    assert matches.subcommand_name() == "sub"
+    assert matches.get_many("command", str) == ()
+
+
+def test_trailing_var_arg_parser_errors_are_returned() -> None:
+    cmd = Command("p").arg(
+        Arg("n").num_args(1, None).trailing_var_arg(True).value_parser(int),
+    )
+    assert isinstance(err(cmd, "1", "x").kind, InvalidValue)
+    assert ok(cmd, "1", "2", "3").get_many("n", int) == (1, 2, 3)
+
+
+def test_trailing_var_arg_can_be_required() -> None:
+    cmd = Command("prog").arg(
+        Arg("command").num_args(1, None).required(True).trailing_var_arg(True),
+    )
+    error = err(cmd)
+    assert error.kind == MissingRequiredArgument(("<COMMAND>...",))
+
+
+def test_trailing_var_arg_usage_has_no_double_dash() -> None:
+    assert TRAILING.render_usage() == "Usage: prog [OPTIONS] <COMMAND>..."
+
+
+STASH = (
+    Command("stash")
+    .args_conflicts_with_subcommands(True)
+    .arg(Arg("message").short("m").long("message"))
+    .subcommand(Command("push").arg(Arg("file")))
+    .subcommand(Command("pop"))
+)
+
+
+def test_parent_argument_with_a_subcommand_conflicts() -> None:
+    error = err(STASH, "--message", "wip", "push", "file")
+    assert error.kind == SubcommandConflict("--message <MESSAGE>", "push")
+    assert "cannot be used with the subcommand 'push'" in error.message
+
+
+def test_parent_argument_alone_is_allowed() -> None:
+    assert ok(STASH, "--message", "wip").get_one("message", str) == "wip"
+
+
+def test_subcommand_alone_is_allowed() -> None:
+    matches = ok(STASH, "push", "file")
+    assert matches.subcommand_name() == "push"
+
+
+def test_parent_default_and_env_do_not_conflict_with_a_subcommand() -> None:
+    defaulted = (
+        Command("stash")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("message").long("message").default_value("wip"))
+        .subcommand(Command("push"))
+    )
+    assert ok(defaulted, "push").subcommand_name() == "push"
+
+    from_env = (
+        Command("stash")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("message").long("message").env("MESSAGE"))
+        .subcommand(Command("push"))
+    )
+    assert ok(from_env, "push", env={"MESSAGE": "wip"}).subcommand_name() == "push"
+
+
+def test_an_explicit_parent_global_conflicts_but_an_inherited_one_does_not() -> None:
+    cmd = (
+        Command("p")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("verbose").short("v").action("count").global_(True))
+        .subcommand(Command("sub"))
+    )
+    assert err(cmd, "-v", "sub").kind == SubcommandConflict("-v", "sub")
+    assert ok(cmd, "sub", "-v").subcommand_name() == "sub"
+
+
+def test_args_conflicts_with_subcommands_applies_per_level() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("g").long("g"))
+        .subcommand(
+            Command("sub")
+            .args_conflicts_with_subcommands(True)
+            .arg(Arg("x").long("x"))
+            .subcommand(Command("deep")),
+        )
+    )
+    assert ok(cmd, "--g", "1", "sub", "deep").subcommand_name() == "sub"
+    assert err(cmd, "sub", "--x", "1", "deep").kind == SubcommandConflict(
+        "--x <X>",
+        "deep",
+    )
+
+
+def test_subcommand_conflict_uses_the_canonical_name_for_an_alias() -> None:
+    cmd = (
+        Command("p")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("x").long("x"))
+        .subcommand(Command("push").alias("p"))
+    )
+    assert err(cmd, "--x", "1", "p").kind == SubcommandConflict("--x <X>", "push")
+
+
+COLOR = (
+    Command("p")
+    .arg(Arg("color").long("color").action("set_true").overrides_with("no_color"))
+    .arg(Arg("no_color").long("no-color").action("set_true").overrides_with("color"))
+)
+
+
+def test_overrides_with_is_last_one_wins() -> None:
+    first = ok(COLOR, "--color", "--no-color")
+    assert first.get_flag("color") is False
+    assert first.get_flag("no_color") is True
+    assert first.value_source("color") == "default_value"
+
+    second = ok(COLOR, "--no-color", "--color")
+    assert second.get_flag("color") is True
+    assert second.get_flag("no_color") is False
+
+
+def test_overrides_with_all_accumulates_targets() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("a").long("a").action("set_true").overrides_with_all(["b", "c"]))
+        .arg(Arg("b").long("b").action("set_true"))
+        .arg(Arg("c").long("c").action("set_true"))
+    )
+    matches = ok(cmd, "--b", "--c", "--a")
+    assert matches.get_flag("a") is True
+    assert matches.get_flag("b") is False
+    assert matches.get_flag("c") is False
+
+
+def test_overrides_with_follows_a_chain() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("a").long("a").action("set_true").overrides_with("b"))
+        .arg(Arg("b").long("b").action("set_true").overrides_with("c"))
+        .arg(
+            Arg("c").long("c").action("set_true").overrides_with("a").overrides_with("b"),
+        )
+    )
+    forward = ok(cmd, "--a", "--b", "--c")
+    assert (forward.get_flag("a"), forward.get_flag("b"), forward.get_flag("c")) == (
+        False,
+        False,
+        True,
+    )
+    backward = ok(cmd, "--c", "--b", "--a")
+    assert (backward.get_flag("a"), backward.get_flag("b"), backward.get_flag("c")) == (
+        True,
+        False,
+        False,
+    )
+
+
+def test_overrides_with_removes_append_and_count_values() -> None:
+    append = (
+        Command("p")
+        .arg(
+            Arg("tags").long("tags").action("append"),
+        )
+        .arg(Arg("no_tags").long("no-tags").action("set_true").overrides_with("tags"))
+    )
+    assert ok(append, "--tags", "a", "--tags", "b", "--no-tags").get_many("tags", str) == ()
+
+    count = (
+        Command("p")
+        .arg(
+            Arg("verbose").short("v").action("count"),
+        )
+        .arg(Arg("quiet").short("q").action("set_true").overrides_with("verbose"))
+    )
+    assert ok(count, "-vv", "-q").get_count("verbose") == 0
+
+
+def test_overrides_with_falls_back_to_default_and_env() -> None:
+    defaulted = (
+        Command("p")
+        .arg(
+            Arg("color").long("color").default_value("auto"),
+        )
+        .arg(Arg("plain").long("plain").action("set_true").overrides_with("color"))
+    )
+    matches = ok(defaulted, "--plain")
+    assert matches.get_one("color", str) == "auto"
+    assert matches.value_source("color") == "default_value"
+
+    from_env = (
+        Command("p")
+        .arg(
+            Arg("color").long("color").env("COLOR"),
+        )
+        .arg(Arg("plain").long("plain").action("set_true").overrides_with("color"))
+    )
+    matches = ok(from_env, "--plain", env={"COLOR": "blue"})
+    assert matches.get_one("color", str) == "blue"
+    assert matches.value_source("color") == "env_variable"
+
+
+def test_overrides_with_removes_a_plain_set_value() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("color").long("color"))
+        .arg(
+            Arg("no_color").long("no-color").action("set_true").overrides_with("color"),
+        )
+    )
+    matches = ok(cmd, "--color", "red", "--no-color")
+    assert matches.get_one("color", str) is None
+    assert not matches.contains_id("color")
+
+
+def test_global_overrides_follow_command_line_order_across_levels() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("verbose").short("v").action("count").global_(True).overrides_with("quiet"))
+        .arg(Arg("quiet").short("q").action("set_true").global_(True).overrides_with("verbose"))
+        .subcommand(Command("sub"))
+    )
+    assert ok(cmd, "-q", "sub", "-v").get_count("verbose") == 1
+    assert ok(cmd, "-v", "sub", "-q").get_count("verbose") == 0
+
+
+EXCLUSIVE = (
+    Command("p")
+    .arg(Arg("version_info").long("version-info").action("set_true").exclusive(True))
+    .arg(Arg("color").long("color").action("set_true"))
+    .arg(Arg("mode").long("mode").default_value("auto"))
+)
+
+
+def test_exclusive_allows_itself_and_ignores_defaults() -> None:
+    matches = ok(EXCLUSIVE, "--version-info")
+    assert matches.get_flag("version_info") is True
+    assert matches.get_one("mode", str) == "auto"
+
+
+def test_exclusive_conflicts_with_any_other_explicit_argument() -> None:
+    error = err(EXCLUSIVE, "--version-info", "--color")
+    assert error.kind == ArgumentConflict("--version-info", "--color")
+
+
+def test_exclusive_counts_environment_values() -> None:
+    cmd = (
+        Command("p")
+        .arg(
+            Arg("version_info").long("version-info").action("set_true").exclusive(True),
+        )
+        .arg(Arg("color").long("color").env("COLOR"))
+    )
+    assert err(cmd, "--version-info", env={"COLOR": "blue"}).kind == ArgumentConflict(
+        "--version-info",
+        "--color <COLOR>",
+    )
+
+
+def test_repeated_exclusive_argument_is_still_a_repeat_error() -> None:
+    assert err(EXCLUSIVE, "--version-info", "--version-info").kind == ArgumentConflict(
+        "--version-info",
+        None,
+    )
+
+
+TOKEN = (
+    Command("p")
+    .arg(Arg("token").required_unless_present("anonymous"))
+    .arg(Arg("anonymous").long("anonymous").action("set_true"))
+)
+
+
+def test_required_unless_present() -> None:
+    assert err(TOKEN).kind == MissingRequiredArgument(("<TOKEN>",))
+    assert ok(TOKEN, "secret").get_one("token", str) == "secret"
+    assert ok(TOKEN, "--anonymous").get_one("token", str) is None
+
+
+def test_required_unless_present_counts_defaults_and_env() -> None:
+    defaulted = (
+        Command("p")
+        .arg(Arg("token").required_unless_present("anonymous"))
+        .arg(Arg("anonymous").long("anonymous").default_value("yes"))
+    )
+    assert ok(defaulted).get_one("token", str) is None
+
+    from_env = (
+        Command("p")
+        .arg(Arg("token").required_unless_present("anonymous"))
+        .arg(Arg("anonymous").long("anonymous").env("ANONYMOUS"))
+    )
+    assert ok(from_env, env={"ANONYMOUS": "yes"}).get_one("token", str) is None
+
+
+OUTPUT = (
+    Command("p")
+    .arg(Arg("mode").long("mode").default_value("read"))
+    .arg(Arg("output").long("output").required_if_eq("mode", "write"))
+)
+
+
+def test_required_if_eq_follows_the_effective_value() -> None:
+    assert ok(OUTPUT).get_one("output", str) is None
+    assert ok(OUTPUT, "--mode", "read", "--output", "x").get_one("output", str) == "x"
+    assert err(OUTPUT, "--mode", "write").kind == MissingRequiredArgument(
+        ("--output <OUTPUT>",),
+    )
+    assert ok(OUTPUT, "--mode", "write", "--output", "x").get_one("output", str) == "x"
+
+
+def test_required_if_eq_uses_the_raw_spelling_not_the_parsed_value() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("mode").long("mode").value_parser(str.upper))
+        .arg(Arg("output").long("output").required_if_eq("mode", "write"))
+    )
+    assert err(cmd, "--mode", "write").kind == MissingRequiredArgument(
+        ("--output <OUTPUT>",),
+    )
+    # Parsed as "WRITE", but the raw spelling does not equal "write".
+    assert ok(cmd, "--mode", "WRITE").get_one("output", str) is None
+
+
+def test_required_if_eq_reads_env_and_default_raw_values() -> None:
+    from_env = (
+        Command("p")
+        .arg(Arg("mode").long("mode").env("MODE"))
+        .arg(Arg("output").long("output").required_if_eq("mode", "write"))
+    )
+    assert err(from_env, env={"MODE": "write"}).kind == MissingRequiredArgument(
+        ("--output <OUTPUT>",),
+    )
+
+    from_default = (
+        Command("p")
+        .arg(Arg("mode").long("mode").default_value("write"))
+        .arg(Arg("output").long("output").required_if_eq("mode", "write"))
+    )
+    assert err(from_default).kind == MissingRequiredArgument(("--output <OUTPUT>",))
+
+
+def test_conditional_requirements_combine_into_one_missing_error() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("a").long("a").required_if_eq("mode", "write"))
+        .arg(Arg("b").long("b").required_unless_present("skip"))
+        .arg(Arg("mode").long("mode"))
+        .arg(Arg("skip").long("skip").action("set_true"))
+    )
+    assert err(cmd, "--mode", "write").kind == MissingRequiredArgument(
+        ("--a <A>", "--b <B>"),
+    )
+    assert ok(cmd, "--mode", "write", "--a", "1", "--skip").get_one("a", str) == "1"
+
+
+def test_an_invalid_trigger_value_wins_over_a_conditional_requirement() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("mode").long("mode").value_parser(["read", "write"]))
+        .arg(Arg("output").long("output").required_if_eq("mode", "write"))
+    )
+    assert isinstance(err(cmd, "--mode", "nope").kind, InvalidValue)
+
+
+def test_requires_and_conditional_missing_do_not_duplicate() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("x").long("x").action("set_true").requires("y"))
+        .arg(Arg("y").long("y").required_unless_present("skip"))
+        .arg(Arg("skip").long("skip").action("set_true"))
+    )
+    assert err(cmd, "--x").kind == MissingRequiredArgument(("--y <Y>",))
+
+
+def test_conditional_arguments_stay_optional_in_usage() -> None:
+    assert "[TOKEN]" in TOKEN.render_usage()
+    assert "[OUTPUT]" not in OUTPUT.render_usage()
+    assert "--output <OUTPUT>" in OUTPUT.render_help()
+
+
 def test_unknown_argument_suggests() -> None:
     cmd = Command("prog").arg(Arg("verbose").long("verbose").action("set_true"))
     error = err(cmd, "--verbos")
@@ -189,6 +616,63 @@ def test_negative_number_needs_escape_or_opt_in() -> None:
     assert ok(positional, "-5").get_one("n", int) == -5
 
 
+NEGATIVE = Command("prog").arg(
+    Arg("offset").long("offset").value_parser(float).allow_negative_numbers(True),
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("-5", -5.0), ("-0.5", -0.5), ("-1.5e-3", -1.5e-3), ("-2E+2", -200.0)],
+)
+def test_allow_negative_numbers_parses_numeric_values(raw: str, expected: float) -> None:
+    assert ok(NEGATIVE, "--offset", raw).get_one("offset", float) == expected
+
+
+@pytest.mark.parametrize("raw", ["-x", "--other", "-1_000", "-.5"])
+def test_allow_negative_numbers_rejects_other_hyphen_tokens(raw: str) -> None:
+    error = err(NEGATIVE, "--offset", raw)
+    assert isinstance(error.kind, InvalidValue)
+    assert error.kind.value is None
+
+
+def test_allow_negative_numbers_applies_to_positionals() -> None:
+    cmd = Command("prog").arg(Arg("n").value_parser(int).allow_negative_numbers(True))
+    assert ok(cmd, "-3").get_one("n", int) == -3
+
+    plain = Command("prog").arg(Arg("n").value_parser(int))
+    assert err(plain, "-3").kind == UnknownArgument("-3")
+
+
+def test_allow_hyphen_values_still_accepts_arbitrary_hyphens() -> None:
+    cmd = Command("prog").arg(
+        Arg("n").long("n").allow_hyphen_values(True).allow_negative_numbers(True),
+    )
+    assert ok(cmd, "--n", "-x").get_one("n", str) == "-x"
+    assert ok(cmd, "--n", "-5").get_one("n", str) == "-5"
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("-5", True),
+        ("-0.5", True),
+        ("-1.5e-3", True),
+        ("-2E+2", True),
+        ("-0", True),
+        ("-", False),
+        ("-x", False),
+        ("-1_000", False),
+        ("-.5", False),
+        ("+1", False),
+        ("5", False),
+        ("--5", False),
+    ],
+)
+def test_negative_number_grammar(token: str, expected: bool) -> None:
+    assert is_negative_number(token) is expected
+
+
 # -- num_args -----------------------------------------------------------------
 
 
@@ -204,6 +688,111 @@ def test_optional_value_with_default_missing() -> None:
     assert ok(cmd, "--color").get_one("color", str) == "always"
     assert ok(cmd, "--color", "never").get_one("color", str) == "never"
     assert ok(cmd, "--color").get_required("color", str) == "always"
+
+
+EQUALS = Command("prog").arg(
+    Arg("color").short("c").long("color").require_equals(True),
+)
+
+
+@pytest.mark.parametrize("argv", [["--color=always"], ["-c=always"]])
+def test_require_equals_accepts_the_equals_spelling(argv: list[str]) -> None:
+    assert ok(EQUALS, *argv).get_one("color", str) == "always"
+
+
+@pytest.mark.parametrize("argv", [["--color", "always"], ["-c", "always"], ["-calways"]])
+def test_require_equals_rejects_a_space_or_cluster_value(argv: list[str]) -> None:
+    error = err(EQUALS, *argv)
+    assert error.kind == InvalidValue("--color=<COLOR>", None)
+    assert error.tip is not None and "equals sign" in error.tip
+
+
+def test_require_equals_still_accepts_an_empty_inline_value() -> None:
+    # `--color=` is an explicit empty value, not a missing one.
+    assert ok(EQUALS, "--color=").get_one("color", str) == ""
+    assert ok(EQUALS, "-c=").get_one("color", str) == ""
+
+
+OPTIONAL_EQUALS = (
+    Command("prog")
+    .arg(
+        Arg("color")
+        .short("c")
+        .long("color")
+        .num_args(0, 1)
+        .default_value("auto")
+        .default_missing_value("always")
+        .require_equals(True),
+    )
+    .arg(Arg("rest"))
+)
+
+
+def test_require_equals_optional_value_does_not_consume_the_next_token() -> None:
+    for spelling in ("--color", "-c"):
+        matches = ok(OPTIONAL_EQUALS, spelling, "blue")
+        assert matches.get_one("color", str) == "always"
+        assert matches.get_one("rest", str) == "blue"
+
+
+def test_require_equals_optional_value_accepts_inline_and_empty_values() -> None:
+    assert ok(OPTIONAL_EQUALS, "--color=never").get_one("color", str) == "never"
+    assert ok(OPTIONAL_EQUALS, "-c=never").get_one("color", str) == "never"
+    assert ok(OPTIONAL_EQUALS, "--color=").get_one("color", str) == ""
+
+
+def test_require_equals_without_default_missing_stores_no_value() -> None:
+    cmd = Command("prog").arg(
+        Arg("color").long("color").num_args(0, 1).require_equals(True),
+    )
+    matches = ok(cmd, "--color")
+    assert matches.contains_id("color")
+    assert matches.get_one("color", str) is None
+
+
+def test_require_equals_with_a_delimiter_can_split_one_inline_value() -> None:
+    cmd = Command("prog").arg(
+        Arg("tags").long("tags").num_args(1, None).value_delimiter(",").require_equals(True),
+    )
+    assert ok(cmd, "--tags=a,b").get_many("tags", str) == ("a", "b")
+    assert isinstance(err(cmd, "--tags", "a,b").kind, InvalidValue)
+
+
+def test_require_equals_applies_to_visible_aliases() -> None:
+    cmd = Command("prog").arg(
+        Arg("color").long("color").visible_alias("colour").require_equals(True)
+    )
+    assert ok(cmd, "--colour=always").get_one("color", str) == "always"
+    assert isinstance(err(cmd, "--colour", "always").kind, InvalidValue)
+
+
+@pytest.mark.parametrize(
+    ("cmd", "expected"),
+    [
+        (
+            Command("prog").arg(
+                Arg("color").short("c").long("color").require_equals(True),
+            ),
+            "-c, --color=<COLOR>",
+        ),
+        (
+            Command("prog").arg(
+                Arg("color").long("color").num_args(0, 1).require_equals(True),
+            ),
+            "--color[=<COLOR>]",
+        ),
+    ],
+)
+def test_require_equals_help_and_usage_labels(cmd: Command, expected: str) -> None:
+    assert expected in cmd.render_help()
+    assert expected.strip() in cmd.render_markdown()
+
+
+def test_require_equals_required_option_in_usage() -> None:
+    cmd = Command("prog").arg(
+        Arg("color").short("c").long("color").required(True).require_equals(True),
+    )
+    assert cmd.render_usage() == "Usage: prog [OPTIONS] --color=<COLOR>"
 
 
 @pytest.mark.parametrize(

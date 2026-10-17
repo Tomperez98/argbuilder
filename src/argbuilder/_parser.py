@@ -22,6 +22,7 @@ from argbuilder._error import (
     MissingRequiredArgument,
     MissingSubcommand,
     ParseFailure,
+    SubcommandConflict,
     TooFewValues,
     TooManyValues,
     UnknownArgument,
@@ -30,7 +31,7 @@ from argbuilder._error import (
 from argbuilder._help import display_arg, render_help, render_version, usage_error
 from argbuilder._invariant import bug, invariant
 from argbuilder._matches import ArgMatches, MatchedArg
-from argbuilder._spec import takes_values
+from argbuilder._spec import is_negative_number, takes_values
 from argbuilder._suggest import suggest
 from argbuilder._value_parser import Invalid, parse_boolish
 
@@ -46,7 +47,14 @@ def parse(
     env: Mapping[str, str],
 ) -> ArgMatches | Error:
     """Parse the tokens after the command name. Recurses once per subcommand level."""
-    return _Parser(cmd, env, (), {}).run(tokens)
+    return _Parser(
+        cmd,
+        env,
+        (),
+        {},
+        given_globals=set(),
+        raw_globals={},
+    ).run(tokens)
 
 
 class _Parser:
@@ -58,6 +66,9 @@ class _Parser:
         env: Mapping[str, str],
         ancestors: tuple[ResolvedCommand, ...],
         globals_: dict[str, list[Any]],
+        *,
+        given_globals: set[str],
+        raw_globals: dict[str, list[str]],
     ) -> None:
         self._cmd = cmd
         self._env = env
@@ -71,10 +82,20 @@ class _Parser:
         Each level finishes after all tokens are consumed (a subcommand takes
         the rest of the line), so every level sees the complete values.
         """
+        self._given_globals = given_globals
+        """Ids of global arguments given anywhere on this command line."""
+        self._raw_local: dict[str, list[str]] = {}
+        """Raw command-line spellings of this level's own arguments."""
+        self._raw_globals = raw_globals
+        """Raw command-line spellings of global arguments, shared across levels."""
+        self._given_here: set[str] = set()
+        """Ids of arguments given explicitly at this level, globals included."""
         self._positional_index = 0
         self._subcommand: tuple[str, ArgMatches] | None = None
         self._escaped = False
         """After a literal "--", every token is positional; a `last` positional opens up."""
+        self._trailing = False
+        """A `trailing_var_arg` positional has started; every later token is its value."""
 
     def run(self, tokens: Sequence[str], start: int = 0) -> ArgMatches | Error:
         cmd = self._cmd
@@ -82,6 +103,12 @@ class _Parser:
             return _help_error(DisplayHelpOnMissingArgumentOrSubcommand(), cmd)
         index = start
         while index < len(tokens):
+            if self._trailing:
+                step = self._trailing_values(tokens, index)
+                if isinstance(step, Error):
+                    return step
+                index = step
+                continue
             token = tokens[index]
             if self._escaped:
                 step = self._positional(token, index)
@@ -91,7 +118,10 @@ class _Parser:
             elif token.startswith("--"):
                 step = self._long(tokens, index)
             elif token.startswith("-") and token != "-":
-                step = self._short(tokens, index)
+                if is_negative_number(token) and self._negative_positional() is not None:
+                    step = self._positional(token, index)
+                else:
+                    step = self._short(tokens, index)
             elif token in cmd.subcommand_names:
                 name = cmd.subcommand_names[token]
                 child = _Parser(
@@ -99,6 +129,8 @@ class _Parser:
                     self._env,
                     (*self._ancestors, cmd),
                     self._globals,
+                    given_globals=self._given_globals,
+                    raw_globals=self._raw_globals,
                 )
                 sub = child.run(tokens, index + 1)
                 if isinstance(sub, Error):
@@ -131,7 +163,13 @@ class _Parser:
             ]
             return self._unknown(token, index, f"--{name}", candidates)
         if takes_values(arg.action):
-            return self._take_values(arg, inline if has_value else None, tokens, index + 1)
+            return self._take_values(
+                arg,
+                inline if has_value else None,
+                tokens,
+                index + 1,
+                flag=f"--{name}",
+            )
         if has_value:
             return self._unexpected_value(arg, inline)
         return self._flag(arg, index + 1)
@@ -151,8 +189,16 @@ class _Parser:
                 )
             rest = cluster[offset + 1 :]
             if takes_values(arg.action):
+                if arg.require_equals and rest and not rest.startswith("="):
+                    return self._missing_equals(arg, f"-{char}")
                 inline = rest.removeprefix("=") if rest else None
-                return self._take_values(arg, inline, tokens, index + 1)
+                return self._take_values(
+                    arg,
+                    inline,
+                    tokens,
+                    index + 1,
+                    flag=f"-{char}",
+                )
             if rest.startswith("="):
                 return self._unexpected_value(arg, rest[1:])
             step = self._flag(arg, index + 1)
@@ -180,9 +226,30 @@ class _Parser:
             return values
         stored = self._local.setdefault(arg.id, [])
         stored.extend(values)
+        self._raw_store(arg).setdefault(arg.id, []).append(token)
+        self._mark_given(arg)
+        self._remove_overridden(arg)
+        if arg.trailing_var_arg:
+            self._trailing = True
         if arg.max_values is not None and len(stored) >= arg.max_values:
             self._positional_index += 1
         return index + 1
+
+    def _trailing_values(self, tokens: Sequence[str], index: int) -> int | Error:
+        """Take every remaining token as a value of the trailing positional."""
+        arg = self._current_positional()
+        if arg is None or not arg.trailing_var_arg:
+            bug("trailing mode without a trailing positional")
+        values = self._parse_values(arg, list(tokens[index:]), env=None)
+        if isinstance(values, Error):
+            return values
+        raw_values = list(tokens[index:])
+        self._local.setdefault(arg.id, []).extend(values)
+        self._raw_store(arg).setdefault(arg.id, []).extend(raw_values)
+        self._mark_given(arg)
+        self._remove_overridden(arg)
+        self._positional_index += 1
+        return len(tokens)
 
     def _unknown(self, token: str, index: int, flag: str, candidates: list[str]) -> int | Error:
         """`token` names no argument here; `flag` is the `--name` or `-c` it starts with."""
@@ -211,11 +278,15 @@ class _Parser:
                 store = self._store(arg)
                 (count,) = store.get(arg.id, [0])
                 store[arg.id] = [count + 1]
+                self._mark_given(arg)
+                self._remove_overridden(arg)
             case "set_true" | "set_false":  # pragma: no branch
                 store = self._store(arg)
                 if arg.id in store:
                     return self._repeated(arg)
                 store[arg.id] = [arg.action == "set_true"]
+                self._mark_given(arg)
+                self._remove_overridden(arg)
         return next_index
 
     def _take_values(
@@ -224,9 +295,17 @@ class _Parser:
         inline: str | None,
         tokens: Sequence[str],
         index: int,
+        *,
+        flag: str | None = None,
     ) -> int | Error:
         if inline is not None:
             raws = [inline]
+        elif arg.require_equals:
+            if arg.min_values > 0:
+                return self._missing_equals(arg, flag)
+            # `--color` with num_args(0, ...) is present with no value; the
+            # next token belongs to the caller, never to this option.
+            raws = []
         else:
             raws = []
             while (
@@ -256,6 +335,9 @@ class _Parser:
             store[arg.id] = values
         else:
             store.setdefault(arg.id, []).extend(values)
+        self._raw_store(arg).setdefault(arg.id, []).extend(raws)
+        self._mark_given(arg)
+        self._remove_overridden(arg)
         return index
 
     def _parse_values(
@@ -295,16 +377,28 @@ class _Parser:
         for arg in self._cmd.args:
             store = self._store(arg)
             if arg.id in store:
-                matched[arg.id] = MatchedArg(tuple(store[arg.id]), "command_line")
+                matched[arg.id] = MatchedArg(
+                    tuple(store[arg.id]),
+                    "command_line",
+                    tuple(self._raw_store(arg).get(arg.id, ())),
+                )
                 continue
             raw = self._env.get(arg.env, "") if arg.env is not None else ""
             if raw != "":
                 values = self._env_values(arg, raw)
                 if isinstance(values, Error):
                     return values
-                matched[arg.id] = MatchedArg(tuple(values), "env_variable")
+                matched[arg.id] = MatchedArg(
+                    tuple(values),
+                    "env_variable",
+                    (raw,) if takes_values(arg.action) else (),
+                )
             elif arg.defaults:
-                matched[arg.id] = MatchedArg(arg.defaults, "default_value")
+                matched[arg.id] = MatchedArg(
+                    arg.defaults,
+                    "default_value",
+                    arg.defaults_raw if takes_values(arg.action) else (),
+                )
         problem = self._validate(matched)
         if problem is not None:
             return problem
@@ -327,6 +421,33 @@ class _Parser:
                 continue
             for other in sorted(arg.conflicts_with & explicit):
                 return self._conflict(arg, cmd.by_id[other])
+        for arg in cmd.args:
+            if not arg.exclusive or arg.id not in explicit:
+                continue
+            other = next(
+                (
+                    candidate
+                    for candidate in cmd.args
+                    if candidate.id in explicit and candidate is not arg
+                ),
+                None,
+            )
+            if other is not None:
+                return self._conflict(arg, other)
+        if cmd.args_conflicts_with_subcommands and self._subcommand is not None:
+            given = next(
+                (
+                    arg
+                    for arg in cmd.args
+                    if arg.id in self._given_here
+                    and (not arg.global_ or arg.id in self._given_globals)
+                ),
+                None,
+            )
+            if given is not None:
+                return self._error(
+                    SubcommandConflict(display_arg(given), self._subcommand[0]),
+                )
         for group in cmd.groups:
             present = [cmd.by_id[member] for member in group.members if member in explicit]
             if not group.multiple and len(present) > 1:
@@ -346,6 +467,30 @@ class _Parser:
                 shown = display_arg(cmd.by_id[needed])
                 if shown not in missing:
                     missing.append(shown)
+
+        def present(id: str) -> bool:
+            """Present for a condition: explicit, or a user-written default, not a flag's implicit one."""
+            entry = matched.get(id)
+            if entry is None:
+                return False
+            return entry.source != "default_value" or bool(cmd.by_id[id].defaults_raw)
+
+        for arg in cmd.conditional_args:
+            if present(arg.id):
+                continue
+            if arg.required_unless_present and any(
+                present(target) for target in arg.required_unless_present
+            ):
+                continue
+            if arg.required_if_eq and not any(
+                configured in matched[trigger].raws
+                for trigger, configured in arg.required_if_eq
+                if trigger in matched
+            ):
+                continue
+            shown = display_arg(arg)
+            if shown not in missing:
+                missing.append(shown)
         if missing:
             return self._error(MissingRequiredArgument(tuple(missing)))
 
@@ -382,6 +527,28 @@ class _Parser:
     def _store(self, arg: ResolvedArg) -> dict[str, list[Any]]:
         return self._globals if arg.global_ else self._local
 
+    def _raw_store(self, arg: ResolvedArg) -> dict[str, list[str]]:
+        return self._raw_globals if arg.global_ else self._raw_local
+
+    def _mark_given(self, arg: ResolvedArg) -> None:
+        """Remember that `arg` came from this level's command line, not env/default."""
+        self._given_here.add(arg.id)
+        if arg.global_:
+            self._given_globals.add(arg.id)
+
+    def _remove_overridden(self, arg: ResolvedArg) -> None:
+        """Last one wins: drop earlier command-line values of `arg.overrides_with`."""
+        if not arg.overrides_with:
+            return
+        store = self._store(arg)
+        raw_store = self._raw_store(arg)
+        for target in arg.overrides_with:
+            store.pop(target, None)
+            raw_store.pop(target, None)
+        self._given_here.difference_update(arg.overrides_with)
+        if arg.global_:
+            self._given_globals.difference_update(arg.overrides_with)
+
     def _current_positional(self) -> ResolvedArg | None:
         positionals = self._cmd.positionals
         index = self._positional_index
@@ -391,6 +558,11 @@ class _Parser:
         # A `last` positional only opens up after a literal "--"; before that,
         # it isn't there to fill, so an extra token is unknown, not assigned to it.
         return None if arg.last and not self._escaped else arg
+
+    def _negative_positional(self) -> ResolvedArg | None:
+        """The current positional, when it opted into negative numeric values."""
+        arg = self._current_positional()
+        return arg if arg is not None and arg.allow_negative_numbers else None
 
     def _pending_last(self) -> ResolvedArg | None:
         """The `last` positional, when it's the reason `_current_positional()` is None."""
@@ -407,6 +579,14 @@ class _Parser:
     def _repeated(self, arg: ResolvedArg) -> Error:
         return self._error(ArgumentConflict(display_arg(arg), None))
 
+    def _missing_equals(self, arg: ResolvedArg, flag: str | None) -> Error:
+        """`require_equals` was set but the value did not use `=`."""
+        used = flag or (f"--{arg.long}" if arg.long is not None else f"-{arg.short}")
+        return self._error(
+            InvalidValue(display_arg(arg), None),
+            tip=f"use '{used}=<{arg.value_name}>' (with an equals sign)",
+        )
+
     def _conflict(self, first: ResolvedArg, second: ResolvedArg) -> Error:
         return self._error(ArgumentConflict(display_arg(first), display_arg(second)))
 
@@ -417,7 +597,9 @@ class _Parser:
 def _is_value(token: str, arg: ResolvedArg) -> bool:
     if token == "--":
         return False
-    return arg.allow_hyphen_values or token == "-" or not token.startswith("-")
+    if arg.allow_hyphen_values or token == "-" or not token.startswith("-"):
+        return True
+    return arg.allow_negative_numbers and is_negative_number(token)
 
 
 def _help_error(kind: ErrorKind, cmd: ResolvedCommand) -> Error:

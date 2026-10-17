@@ -20,7 +20,7 @@ from argbuilder._suggest import suggest
 def _resolved() -> tuple[_Parser, ResolvedArg]:
     cmd = Command("x").arg(Arg("a").long("a"))
     resolved = build(cmd._spec)  # noqa: SLF001
-    parser = _Parser(resolved, {}, (), {})
+    parser = _Parser(resolved, {}, (), {}, given_globals=set(), raw_globals={})
     return parser, resolved.by_long["a"]
 
 
@@ -28,6 +28,12 @@ def test_flag_panics_for_a_value_taking_argument() -> None:
     parser, arg = _resolved()
     with pytest.raises(AssertionError, match="value-taking argument 'a'"):
         parser._flag(arg, 0)  # noqa: SLF001
+
+
+def test_trailing_values_without_a_trailing_positional_panics() -> None:
+    parser, _ = _resolved()
+    with pytest.raises(AssertionError, match="trailing mode without a trailing positional"):
+        parser._trailing_values(["x"], 0)  # noqa: SLF001
 
 
 def test_parse_values_panics_without_a_parser() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
@@ -64,6 +65,24 @@ def takes_values(action: ArgAction) -> bool:
     return action in {"set", "append"}
 
 
+_NEGATIVE_NUMBER = re.compile(r"-\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+_NEGATIVE_NUMBER_PREFIX = re.compile(r"-\d+(?:\.\d*)?(?:[eE][+-]?\d*)?")
+
+
+def is_negative_number(token: str) -> bool:
+    """Whether `token` is a plain negative numeric literal: `-5`, `-0.5`, `-1.5e-3`.
+
+    Deliberately narrower than `float()`: no underscores, `nan`, `inf`, leading
+    `+`, or locale-specific forms. `-` alone is not a number.
+    """
+    return _NEGATIVE_NUMBER.fullmatch(token) is not None
+
+
+def is_negative_number_prefix(token: str) -> bool:
+    """Whether `token` is a prefix of a negative number, for completion (`-1.`)."""
+    return _NEGATIVE_NUMBER_PREFIX.fullmatch(token) is not None
+
+
 @dataclass(frozen=True, slots=True)
 class ArgSpec:
     id: str
@@ -80,9 +99,17 @@ class ArgSpec:
     env: str | None = None
     conflicts_with: frozenset[str] = frozenset()
     requires: frozenset[str] = frozenset()
+    overrides_with: frozenset[str] = frozenset()
+    exclusive: bool = False
+    required_unless_present: frozenset[str] = frozenset()
+    required_if_eq: tuple[tuple[str, str], ...] = ()
     allow_hyphen_values: bool = False
+    allow_negative_numbers: bool = False
+    require_equals: bool = False
+    """Only accept a value with `=`: `--color=always`, never `--color always`."""
     value_delimiter: str | None = None
     last: bool = False
+    trailing_var_arg: bool = False
     hide: bool = False
     global_: bool = False
     value_hint: ValueHint | None = None
@@ -110,6 +137,7 @@ class CommandSpec:
     groups: tuple[GroupSpec, ...] = ()
     subcommands: tuple[CommandSpec, ...] = ()
     subcommand_required: bool = False
+    args_conflicts_with_subcommands: bool = False
     completion_subcommand: bool = False
     arg_required_else_help: bool = False
     disable_help_flag: bool = False

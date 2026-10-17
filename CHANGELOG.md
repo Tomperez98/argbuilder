@@ -31,6 +31,29 @@ section here at all.
   suitable for `eval "$(mycli completion bash)"`, and
   `get_matches_from()` handles printing and exit just like `get_matches()`.
   No shell configuration is modified.
+- `Arg.require_equals(True)` requires value-taking options to use the `=`
+  spelling: `--color=always` and `-c=always` work; `--color always`,
+  `-c always` and `-calways` are user errors. With `num_args(0, 1)`, a bare
+  `--color` still selects the argument and uses `default_missing_value()` or
+  no value without consuming the next token. Help and Markdown render
+  `--color=<WHEN>` and `--color[=<WHEN>]` accordingly.
+- `Arg.allow_negative_numbers(True)` accepts negative numeric values on
+  options and positionals (`-5`, `-0.5`, `-1.5e-3`) without accepting arbitrary
+  hyphenated tokens. A digit short on the same command is a definition bug.
+- `Arg.trailing_var_arg(True)` captures every token from the first value
+  onward, verbatim and without `--`: `mytool run cargo build --release`.
+  It must be the final positional with an unbounded `num_args`.
+- `Arg.overrides_with(id)` / `overrides_with_all(ids)` give last-one-wins
+  semantics for flags and values, including across global levels. Defaults and
+  environment values are not erased. `Arg.exclusive(True)` rejects any other
+  explicit argument.
+- `Arg.required_unless_present(id)` and `Arg.required_if_eq(id, value)` express
+  conditional requirements. `required_if_eq` compares the raw command-line,
+  environment or default spelling, not the parsed value.
+- `Command.args_conflicts_with_subcommands(True)` makes parent arguments and
+  subcommands mutually exclusive and reports the new `SubcommandConflict`
+  error kind. A required parent argument or group with this setting is a
+  definition bug because no subcommand could then be used.
 
 ## [2.0.0] - 2026-10-16
 

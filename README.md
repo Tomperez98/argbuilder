@@ -251,7 +251,10 @@ completion, but neither fish nor PowerShell can restrict completion to
 directories, so `dir` still offers files there. Path hints apply to a separate
 value word: `--config ` completes paths, while `--config=` suppresses path
 completion, so `--config=path` has to be typed in full. Choice values such as
-`--color=auto` are completed by the engine either way.
+`--color=auto` are completed by the engine either way. For a
+`require_equals()` option, completion offers the option name; type `=` before
+the value. Offering the trailing `=` itself needs per-shell no-space support
+and is still a follow-up.
 
 ## Docs
 
@@ -293,6 +296,12 @@ Coming from [clap]? The builder API maps almost one to one:
 | `Error::exit`, `ErrorKind`, `Command::error` | `Error.exit()`, `ErrorKind`, `Command.error()`, and `ArgMatches.error()` for the subcommand you're in |
 | `Arg::global(true)` | `.global_(True)` (`global` is a Python keyword). See below for how repeats work. |
 | `Arg::last(true)` | `.last(True)`: a positional filled only after a literal `--`, taking every token after it verbatim (`mytool run -- cargo build --release`). |
+| `Arg::require_equals(true)` | `.require_equals(True)`: only `--color=always` / `-c=always`; the next token is never consumed. |
+| `Arg::allow_negative_numbers(true)` | `.allow_negative_numbers(True)`: `-5`, `-0.5`, `-1.5e-3` are values; other hyphen tokens still parse as flags. |
+| `Arg::trailing_var_arg(true)` | `.trailing_var_arg(True)`: after the first value, every token is captured verbatim, with no `--`. |
+| `Arg::overrides_with`, `Arg::exclusive` | `.overrides_with(id)`, `.overrides_with_all(ids)`, `.exclusive(True)`. |
+| `Arg::required_unless_present`, `Arg::required_if_eq` | The same names. |
+| `Command::args_conflicts_with_subcommands(true)` | `.args_conflicts_with_subcommands(True)`. |
 | `alias`, `visible_alias`, `short_alias`, `visible_short_alias` | The same names, on `Arg` and (`alias` / `visible_alias`) on `Command`. Call once per alias. |
 | the `help` subcommand, `disable_help_subcommand` | The same: `git help`, `git help push` |
 
@@ -311,13 +320,60 @@ match result.kind:
         ...  # e.g. typed "--prot", closest "--port"
 ```
 
+`require_equals(True)` applies to both spellings of an option: `--color=always`
+and `-c=always` work, while `--color always`, `-c always` and `-calways` are
+errors. It only applies to value-taking options with `short()` or `long()`;
+a positional has no `=` spelling. With `num_args(0, 1)`, a bare `--color`
+still selects the argument and uses `default_missing_value()` or no value,
+and never consumes the next token. `value_delimiter()` may split the single
+inline value, so `--tags=a,b` can produce several values.
+
+`allow_negative_numbers(True)` accepts the plain negative numeric grammar
+`-5`, `-0.5`, `-1.5e-3` (no underscores, `nan`, `inf`, or bare `-`). It works
+for options and positionals; `-x` still parses as a flag. A digit short such
+as `-5` cannot coexist with it on the same command, because both would claim
+the same token.
+
+`trailing_var_arg(True)` is the no-`--` wrapper mode:
+`mytool run cargo build --release` stores `("cargo", "build", "--release")`.
+It must be the final positional with `num_args(..., None)` and cannot be
+combined with `last()` or `allow_hyphen_values()`. A subcommand name still
+wins before the trailing positional starts; a later `--` is a value.
+
+`overrides_with(id)` is last-one-wins: using the argument removes earlier
+command-line values of `id`. Defaults and environment values are not erased;
+they become effective again if the overridden argument has no explicit value.
+Both arguments must be global or both local, and an argument cannot both
+override and conflict with the same target. `exclusive(True)` reports an
+`ArgumentConflict` when any other argument is explicit; defaults do not count,
+environment values do.
+
+`required_unless_present(id)` requires an argument unless `id` has a value
+from the command line or environment, or has a user-written default. A flag's
+implicit `False`/`0` does not count. `required_if_eq(id, value)` requires the
+argument when `id`'s effective raw spelling equals `value`; the comparison is
+on the raw command-line, environment or default string, not the parsed value.
+Both forms combine all missing arguments into one `MissingRequiredArgument`.
+A conditional argument is a definition bug if it is also `required(True)` or
+has a default.
+
+`args_conflicts_with_subcommands(True)` makes a command's own arguments
+mutually exclusive with its subcommands: `stash --message wip` and
+`stash push file` work, while mixing them returns `SubcommandConflict`.
+Defaults and environment values do not count as parent arguments, but an
+explicit parent global does; a global given only inside the subcommand does
+not. A required parent argument or required group would make every subcommand
+unusable, so that combination panics when the command is built.
+
 Also supported: `env`, `default_value(s)`, `default_missing_value`,
-`conflicts_with(_all)`, `requires`, `ArgGroup` (`required`, `multiple`),
-`allow_hyphen_values`, `value_delimiter`, `last`, `hide`, `value_hint`,
-`arg_required_else_help`, `disable_help_flag` / `disable_version_flag`, typo
-suggestions for arguments, subcommands and values, and a tip when an option is
-used at the wrong level (`git push -V`: "'-V' is an option of 'git'; put it
-before 'push'").
+`conflicts_with(_all)`, `requires`, `overrides_with(_all)`, `exclusive`,
+`required_unless_present`, `required_if_eq`, `ArgGroup` (`required`, `multiple`),
+`allow_hyphen_values`, `allow_negative_numbers`, `require_equals`,
+`value_delimiter`, `last`, `trailing_var_arg`, `hide`, `value_hint`,
+`args_conflicts_with_subcommands`, `arg_required_else_help`,
+`disable_help_flag` / `disable_version_flag`, typo suggestions for arguments,
+subcommands and values, and a tip when an option is used at the wrong level
+(`git push -V`: "'-V' is an option of 'git'; put it before 'push'").
 
 `-h/--help` and `-V/--version` are added for you. `help` and `version` are
 reserved ids: an argument with one of them must use the matching `help` /

@@ -89,6 +89,14 @@ class MissingRequiredArgument:
 
 
 @dataclass(frozen=True, slots=True)
+class SubcommandConflict:
+    """A parent argument used together with a subcommand that excludes it."""
+
+    argument: str
+    command: str
+
+
+@dataclass(frozen=True, slots=True)
 class MissingSubcommand:
     """`subcommand_required(True)` and no subcommand was given."""
 
@@ -124,6 +132,7 @@ type ParseFailure = (
     | TooManyValues
     | TooFewValues
     | ArgumentConflict
+    | SubcommandConflict
     | MissingRequiredArgument
     | MissingSubcommand
 )
@@ -173,6 +182,8 @@ def describe(kind: ParseFailure) -> str:
             return f"the argument '{argument}' cannot be used multiple times"
         case ArgumentConflict(argument, other):
             return f"the argument '{argument}' cannot be used with '{other}'"
+        case SubcommandConflict(argument, command):
+            return f"the argument '{argument}' cannot be used with the subcommand '{command}'"
         case MissingSubcommand(command, subcommands):
             return (
                 f"'{command}' requires a subcommand but one was not provided\n"

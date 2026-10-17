@@ -162,6 +162,21 @@ class Command:
     def subcommand_required(self, yes: bool) -> Command:
         return self._with(subcommand_required=_check_bool(repr(self), "subcommand_required", yes))
 
+    def args_conflicts_with_subcommands(self, yes: bool) -> Command:
+        """Make this command's own arguments mutually exclusive with its subcommands.
+
+        `stash --message wip` and `stash push file` both work;
+        `stash --message wip push file` is a user error. Defaults and
+        environment values do not trigger the conflict. Because a required
+        argument would make every subcommand unusable, combining this with a
+        required argument or required group is a definition bug.
+        """
+        return self._with(
+            args_conflicts_with_subcommands=_check_bool(
+                repr(self), "args_conflicts_with_subcommands", yes
+            ),
+        )
+
     def arg_required_else_help(self, yes: bool) -> Command:
         """With no arguments at all, print help to stderr and exit 2."""
         return self._with(

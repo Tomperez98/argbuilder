@@ -22,7 +22,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from argbuilder._invariant import invariant
-from argbuilder._spec import SHELLS, Shell, takes_values
+from argbuilder._spec import (
+    SHELLS,
+    Shell,
+    is_negative_number_prefix,
+    takes_values,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -192,6 +197,7 @@ class _State:
         self.positional_index = 0
         self.positional_count = 0
         self.escaped = False
+        self.trailing_started = False
         self.pending: ResolvedArg | None = None
         self.pending_count = 0
         self.help_parent: ResolvedCommand | None = None
@@ -199,6 +205,9 @@ class _State:
     def walk(self, tokens: Sequence[str]) -> None:
         """Consume the words before the cursor, ignoring all validation."""
         for token in tokens:
+            if self.trailing_started:
+                self._consume_positional()
+                continue
             if self.pending is not None:
                 if _value_like(token, self.pending):
                     self._consume_pending()
@@ -216,7 +225,15 @@ class _State:
             elif token.startswith("--"):
                 self._long(token)
             elif token.startswith("-") and token != "-":
-                self._short(token)
+                positional = self._current_positional()
+                if (
+                    is_negative_number_prefix(token)
+                    and positional is not None
+                    and positional.allow_negative_numbers
+                ):
+                    self._consume_positional()
+                else:
+                    self._short(token)
             else:
                 self._word(token)
 
@@ -234,6 +251,9 @@ class _State:
             return
         if not takes_values(arg.action):
             return
+        if arg.require_equals and not has_value:
+            # `--color` is complete on its own; the next word is not its value.
+            return
         self._start_pending(arg, 1 if has_value else 0)
         if has_value and inline != "" and self.pending is not None:
             self._consume_pending()
@@ -247,6 +267,9 @@ class _State:
             if not takes_values(arg.action):
                 continue
             rest = cluster[offset + 1 :]
+            if arg.require_equals and not rest.startswith("="):
+                # `-c` and `-cvalue` do not consume the next word; only `-c=...` does.
+                return
             inline = rest.removeprefix("=") if rest else None
             self._start_pending(arg, 1 if inline is not None else 0)
             if inline not in (None, "") and self.pending is not None:
@@ -279,6 +302,7 @@ class _State:
         self.positional_index = 0
         self.positional_count = 0
         self.escaped = False
+        self.trailing_started = False
         self.pending = None
         self.pending_count = 0
 
@@ -286,6 +310,8 @@ class _State:
         arg = self._current_positional()
         if arg is None:
             return
+        if arg.trailing_var_arg:
+            self.trailing_started = True
         self.positional_count += 1
         if arg.max_values is not None and self.positional_count >= arg.max_values:
             self.positional_index += 1
@@ -301,10 +327,17 @@ class _State:
 
     def result(self, token: str) -> CompletionResult:
         """Candidates for the word currently being completed."""
+        if self.trailing_started:
+            return self._positional_result(token)
         if self.escaped:
             return self._positional_result(token)
         if self.pending is not None and _can_be_value(token, self.pending):
             return _value_result(self.pending, token, prefix="")
+
+        if is_negative_number_prefix(token):
+            positional = self._current_positional()
+            if positional is not None and positional.allow_negative_numbers:
+                return self._positional_result(token)
 
         if token.startswith("--"):
             return self._long_result(token)
@@ -474,13 +507,15 @@ def _without_duplicates(candidates: list[Completion]) -> list[Completion]:
 
 
 def _value_like(token: str, arg: ResolvedArg) -> bool:
-    return arg.allow_hyphen_values or token == "-" or not token.startswith("-")
+    return _can_be_value(token, arg)
 
 
 def _can_be_value(token: str, arg: ResolvedArg) -> bool:
     if arg.allow_hyphen_values:
         return True
-    return not token.startswith("-") or token == "-"
+    if not token.startswith("-") or token == "-":
+        return True
+    return arg.allow_negative_numbers and is_negative_number_prefix(token)
 
 
 # -- shell scripts -----------------------------------------------------------
