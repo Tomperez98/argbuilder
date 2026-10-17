@@ -13,11 +13,13 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from argbuilder._invariant import bug, invariant
-from argbuilder._spec import ArgAction, ArgSpec, CommandSpec, takes_values
+from argbuilder._spec import SHELLS, ArgAction, ArgSpec, CommandSpec, takes_values
 from argbuilder._value_parser import Invalid, ValueParser
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
+
+    from argbuilder._spec import ValueHint
 
 MAX_COMMAND_DEPTH = 32
 """Subcommand nesting bound. A deeper tree is a construction bug, not a real CLI."""
@@ -46,6 +48,21 @@ _HELP_SUBCOMMAND = CommandSpec(
 )
 """Added to every command with subcommands. The parser turns its matches into help."""
 
+_COMPLETION_SUBCOMMAND = CommandSpec(
+    name="completion",
+    about="Generate a shell completion script",
+    args=(
+        ArgSpec(
+            id="shell",
+            value_name="SHELL",
+            required=True,
+            value_parser=ValueParser.choices(*SHELLS),
+            help="Shell to generate completions for",
+        ),
+    ),
+)
+"""Added by `completion_subcommand(True)`; the process edge prints its script."""
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ResolvedArg:
@@ -67,11 +84,19 @@ class ResolvedArg:
     env: str | None
     conflicts_with: frozenset[str]
     requires: frozenset[str]
+    overrides_with: frozenset[str]
+    exclusive: bool
+    required_unless_present: frozenset[str]
+    required_if_eq: tuple[tuple[str, str], ...]
     allow_hyphen_values: bool
+    allow_negative_numbers: bool
+    require_equals: bool
     value_delimiter: str | None
     last: bool
+    trailing_var_arg: bool
     hide: bool
     global_: bool
+    value_hint: ValueHint | None
     aliases: tuple[str, ...]
     visible_aliases: tuple[str, ...]
     short_aliases: tuple[str, ...]
@@ -124,6 +149,8 @@ class ResolvedCommand:
     """Args with a non-empty `conflicts_with`, precomputed for the conflict check."""
     requiring_args: tuple[ResolvedArg, ...]
     """Args with a non-empty `requires`, precomputed for the requires check."""
+    conditional_args: tuple[ResolvedArg, ...]
+    """Args with conditional requirements, precomputed for validation."""
     groups: tuple[ResolvedGroup, ...]
     subcommands: Mapping[str, ResolvedCommand]
     """By canonical name, in definition order, the auto `help` subcommand last."""
@@ -131,6 +158,8 @@ class ResolvedCommand:
     """Every name or alias that selects a subcommand, to its canonical name."""
     help_subcommand: bool
     """`subcommands["help"]` is the automatic one, which prints help instead of matching."""
+    completion_subcommand: bool
+    """`completion_subcommand(True)` opted into the automatic `completion` command."""
     aliases: tuple[str, ...]
     visible_aliases: tuple[str, ...]
     inherited: frozenset[str]
@@ -138,7 +167,9 @@ class ResolvedCommand:
     env_names: frozenset[str]
     """Every environment variable this command or a subcommand below it reads."""
     subcommand_required: bool
+    args_conflicts_with_subcommands: bool
     arg_required_else_help: bool
+    hidden: bool
     help_hint: str | None
     """How errors point at help, e.g. `'--help'`; None when help is disabled."""
 
@@ -179,9 +210,14 @@ def _build(
         depth > 0 or not (spec.aliases or spec.visible_aliases),
         f"{where}: aliases only apply to subcommands",
     )
+    invariant(
+        depth > 0 or not spec.hidden,
+        f"{where}: hide() only applies to subcommands; a top-level command is never hidden",
+    )
 
     args = _resolve_args(spec, where, inherited)
     by_id, by_short, by_long = _index_args(args, where)
+    _check_negative_number_shorts(args, by_short, where)
 
     positionals = tuple(arg for arg in args if arg.is_positional)
     _check_positionals(positionals, where)
@@ -195,6 +231,11 @@ def _build(
     required_args = tuple(arg for arg in args if arg.required)
     conflicting_args = tuple(arg for arg in args if arg.conflicts_with)
     requiring_args = tuple(arg for arg in args if arg.requires)
+    conditional_args = tuple(
+        arg for arg in args if arg.required_unless_present or arg.required_if_eq
+    )
+    _check_conditional_requirements(conditional_args, args, where)
+    _check_subcommand_conflicts(spec, required_args, groups, where)
 
     subcommands, subcommand_names, help_subcommand = _resolve_subcommands(
         spec, path, depth, globals_, where
@@ -217,16 +258,20 @@ def _build(
         required_args=required_args,
         conflicting_args=conflicting_args,
         requiring_args=requiring_args,
+        conditional_args=conditional_args,
         groups=tuple(groups),
         subcommands=MappingProxyType(subcommands),
         subcommand_names=MappingProxyType(subcommand_names),
         help_subcommand=help_subcommand,
+        completion_subcommand=spec.completion_subcommand,
         aliases=spec.aliases,
         visible_aliases=spec.visible_aliases,
         inherited=frozenset(arg.id for arg in inherited),
         env_names=env_names,
         subcommand_required=spec.subcommand_required,
+        args_conflicts_with_subcommands=spec.args_conflicts_with_subcommands,
         arg_required_else_help=spec.arg_required_else_help,
+        hidden=spec.hidden,
         help_hint=None if help_arg is None else _help_hint(help_arg),
     )
 
@@ -291,14 +336,30 @@ def _index_args(
     return by_id, by_short, by_long
 
 
+def _check_negative_number_shorts(
+    args: Sequence[ResolvedArg],
+    by_short: Mapping[str, ResolvedArg],
+    where: str,
+) -> None:
+    """`allow_negative_numbers` and a digit short both claim `-5`; refuse the ambiguity."""
+    if not any(arg.allow_negative_numbers for arg in args):
+        return
+    for short in sorted(by_short):
+        invariant(
+            not short.isdigit(),
+            f"{where}: short '-{short}' collides with allow_negative_numbers(); "
+            f"a token like '-{short}' could be either a flag or a value",
+        )
+
+
 def _check_cross_references(
     args: Sequence[ResolvedArg],
     by_id: Mapping[str, ResolvedArg],
     where: str,
 ) -> None:
-    """Every `conflicts_with`/`requires` must name a real argument in scope."""
+    """Every cross-reference must name a real argument in scope, with coherent rules."""
     for arg in args:
-        for other in sorted(arg.conflicts_with | arg.requires):
+        for other in sorted(arg.conflicts_with | arg.requires | arg.overrides_with):
             invariant(other != arg.id, f"{where}: argument {arg.id!r} refers to itself")
             invariant(
                 other in by_id,
@@ -308,6 +369,88 @@ def _check_cross_references(
                 not arg.global_ or by_id[other].global_,
                 f"{where}: global argument {arg.id!r} refers to {other!r}, which is not "
                 f"global, so subcommands could not check it; make {other!r} global too",
+            )
+        for other in sorted(arg.overrides_with):
+            target = by_id[other]
+            invariant(
+                arg.global_ == target.global_,
+                f"{where}: argument {arg.id!r} overrides {other!r}, but one is global "
+                f"and the other is not; override targets must share the same scope",
+            )
+            invariant(
+                other not in arg.conflicts_with and arg.id not in target.conflicts_with,
+                f"{where}: argument {arg.id!r} both overrides and conflicts with {other!r}",
+            )
+
+
+def _check_subcommand_conflicts(
+    spec: CommandSpec,
+    required_args: Sequence[ResolvedArg],
+    groups: Sequence[ResolvedGroup],
+    where: str,
+) -> None:
+    """`args_conflicts_with_subcommands` must not make subcommands unusable."""
+    if not spec.args_conflicts_with_subcommands:
+        return
+    if required_args:
+        bug(
+            f"{where}: args_conflicts_with_subcommands(True) but argument "
+            f"{required_args[0].id!r} is required; a subcommand could never be used",
+        )
+    required_groups = [group.id for group in groups if group.required]
+    if required_groups:
+        bug(
+            f"{where}: args_conflicts_with_subcommands(True) but group "
+            f"{required_groups[0]!r} is required; a subcommand could never be used",
+        )
+
+
+def _check_conditional_requirements(
+    conditional_args: Sequence[ResolvedArg],
+    args: Sequence[ResolvedArg],
+    where: str,
+) -> None:
+    """Validate conditional requirement targets and reject contradictory forms."""
+    by_id = {arg.id: arg for arg in args}
+    for arg in conditional_args:
+        if arg.required_unless_present and arg.required_if_eq:
+            bug(
+                f"{where}: argument {arg.id!r} combines required_unless_present() and "
+                f"required_if_eq(); pick one condition form",
+            )
+        if arg.required:
+            bug(
+                f"{where}: argument {arg.id!r} is both required(True) and conditionally "
+                f"required; drop required(True)",
+            )
+        if arg.defaults:
+            bug(
+                f"{where}: argument {arg.id!r} has a default value, so its conditional "
+                f"requirement could never apply",
+            )
+        targets = [
+            *sorted(arg.required_unless_present),
+            *(trigger for trigger, _ in arg.required_if_eq),
+        ]
+        for target in targets:
+            invariant(
+                target != arg.id,
+                f"{where}: argument {arg.id!r} refers to itself",
+            )
+            invariant(
+                target in by_id,
+                f"{where}: argument {arg.id!r} refers to unknown argument {target!r}",
+            )
+            invariant(
+                not arg.global_ or by_id[target].global_,
+                f"{where}: global argument {arg.id!r} refers to {target!r}, which is not "
+                f"global, so subcommands could not check it; make {target!r} global too",
+            )
+        for trigger, _ in arg.required_if_eq:
+            invariant(
+                takes_values(by_id[trigger].action),
+                f"{where}: argument {arg.id!r} uses required_if_eq() on {trigger!r}, "
+                f"which does not take a value",
             )
 
 
@@ -340,6 +483,10 @@ def _resolve_subcommands(
     where: str,
 ) -> tuple[dict[str, ResolvedCommand], dict[str, str], bool]:
     """Build the subcommands, index every name and alias, and add the automatic `help` subcommand."""
+    invariant(
+        depth == 0 or not spec.completion_subcommand,
+        f"{where}: completion_subcommand(True) only applies to the root command",
+    )
     subcommands: dict[str, ResolvedCommand] = {}
     subcommand_names: dict[str, str] = {}
     for sub in spec.subcommands:
@@ -355,6 +502,14 @@ def _resolve_subcommands(
             )
             subcommand_names[name] = sub.name
         subcommands[sub.name] = _build(sub, path, depth + 1, globals_)
+    if spec.completion_subcommand:
+        invariant(
+            "completion" not in subcommand_names,
+            f"{where}: subcommand name 'completion' is already used; "
+            f"completion_subcommand(True) adds one automatically",
+        )
+        subcommands["completion"] = _build(_COMPLETION_SUBCOMMAND, path, depth + 1, ())
+        subcommand_names["completion"] = "completion"
     invariant(
         not spec.subcommand_required or len(subcommands) > 0,
         f"{where}: subcommand_required(True) but no subcommands are defined",
@@ -406,11 +561,19 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
         env=spec.env,
         conflicts_with=spec.conflicts_with,
         requires=spec.requires,
+        overrides_with=spec.overrides_with,
+        exclusive=spec.exclusive,
+        required_unless_present=spec.required_unless_present,
+        required_if_eq=spec.required_if_eq,
         allow_hyphen_values=spec.allow_hyphen_values,
+        allow_negative_numbers=spec.allow_negative_numbers,
+        require_equals=spec.require_equals,
         value_delimiter=spec.value_delimiter,
         last=spec.last,
+        trailing_var_arg=spec.trailing_var_arg,
         hide=spec.hide,
         global_=spec.global_,
+        value_hint=spec.value_hint,
         aliases=spec.aliases,
         visible_aliases=spec.visible_aliases,
         short_aliases=spec.short_aliases,
@@ -426,6 +589,10 @@ def _check_arg_shape(spec: ArgSpec, action: ArgAction, label: str, positional: b
             spec.aliases or spec.visible_aliases or spec.short_aliases or spec.visible_short_aliases
         ),
         f"{label}: aliases need short() or long(); a positional has no flag to alias",
+    )
+    invariant(
+        not (positional and spec.exclusive),
+        f"{label}: exclusive() needs short() or long(); a positional cannot conflict with all others",
     )
     if spec.global_:
         invariant(not positional, f"{label}: global_() needs short() or long()")
@@ -462,6 +629,17 @@ def _resolve_value_arg(
         f"{label}: value_delimiter() is only supported on options",
     )
     invariant(
+        not (positional and spec.require_equals),
+        f"{label}: require_equals() needs short() or long(); a positional has no '=' spelling",
+    )
+    invariant(
+        not spec.require_equals
+        or spec.value_delimiter is not None
+        or (max_values is not None and max_values <= 1),
+        f"{label}: require_equals() supplies at most one value with '='; "
+        f"use num_args(0, 1) or add value_delimiter() to split that value",
+    )
+    invariant(
         not spec.last or positional,
         f"{label}: last() needs a positional argument; give it neither short() nor long()",
     )
@@ -469,6 +647,23 @@ def _resolve_value_arg(
         not (spec.last and spec.allow_hyphen_values),
         f"{label}: allow_hyphen_values() does nothing with last(); "
         f"every value after '--' is already taken verbatim",
+    )
+    invariant(
+        not spec.trailing_var_arg or positional,
+        f"{label}: trailing_var_arg() needs a positional; give it neither short() nor long()",
+    )
+    invariant(
+        not (spec.trailing_var_arg and spec.last),
+        f"{label}: trailing_var_arg() and last() are different syntaxes; pick one",
+    )
+    invariant(
+        not (spec.trailing_var_arg and spec.allow_hyphen_values),
+        f"{label}: allow_hyphen_values() does nothing with trailing_var_arg(); "
+        f"every token after it starts is already a value",
+    )
+    invariant(
+        not spec.trailing_var_arg or max_values is None,
+        f"{label}: trailing_var_arg() needs an unbounded num_args(..., None)",
     )
     invariant(
         action == "append" or max_values is None or len(spec.default_values) <= max_values,
@@ -505,8 +700,12 @@ def _resolve_flag_arg(
             ("default_missing_value", bool(spec.default_missing_values)),
             ("value_delimiter", spec.value_delimiter is not None),
             ("allow_hyphen_values", spec.allow_hyphen_values),
+            ("allow_negative_numbers", spec.allow_negative_numbers),
+            ("require_equals", spec.require_equals),
             ("value_name", spec.value_name is not None),
+            ("value_hint", spec.value_hint is not None),
             ("last", spec.last),
+            ("trailing_var_arg", spec.trailing_var_arg),
         )
         if is_set
     ]
@@ -530,22 +729,32 @@ def _parse_default(parser: ValueParser[Any], raw: str, label: str) -> Any:
 
 
 def _check_positionals(positionals: Sequence[ResolvedArg], where: str) -> None:
-    for arg in positionals[:-1]:
-        invariant(
-            arg.min_values == arg.max_values,
-            f"{where}: positional {arg.id!r} takes a variable number of values, "
-            f"so it must be the last positional",
-        )
     last_ids = [arg.id for arg in positionals if arg.last]
     invariant(
         len(last_ids) <= 1,
         f"{where}: last(True) is set on more than one positional: {last_ids}",
+    )
+    trailing_ids = [arg.id for arg in positionals if arg.trailing_var_arg]
+    invariant(
+        len(trailing_ids) <= 1,
+        f"{where}: trailing_var_arg(True) is set on more than one positional: {trailing_ids}",
+    )
+    invariant(
+        not trailing_ids or positionals[-1].id == trailing_ids[0],
+        f"{where}: trailing_var_arg(True) positional "
+        f"{trailing_ids[0] if trailing_ids else ''!r} must be the final positional",
     )
     invariant(
         not last_ids or positionals[-1].id == last_ids[0],
         f"{where}: last(True) positional {last_ids[0] if last_ids else ''!r} "
         f"must be the final positional",
     )
+    for arg in positionals[:-1]:
+        invariant(
+            arg.min_values == arg.max_values,
+            f"{where}: positional {arg.id!r} takes a variable number of values, "
+            f"so it must be the last positional",
+        )
     optional_seen = None
     for arg in positionals:
         if optional_seen is not None:

@@ -10,23 +10,17 @@ Bugs panic, user mistakes return values:
 `ArgAction` and `ValueSource` are `Literal` strings: `.action("count")`.
 `ErrorKind` is a union of frozen dataclasses that carry what went wrong:
 `match error.kind: case InvalidValue(argument=a, value=v): ...`.
-
-Or derive the command from a class, as with clap's derive API:
-`@parser class Cli: port: int = arg(short=True, default=22)`, then `parse(Cli)`.
 """
 
 from __future__ import annotations
 
 from argbuilder._arg import Arg, ArgGroup
 from argbuilder._command import Command
-from argbuilder._derive import (
-    args,
-    from_arg_matches,
-    parse,
-    parse_from,
-    parser,
-    to_command,
-    try_parse_from,
+from argbuilder._completion import (
+    Completion,
+    CompletionDirective,
+    CompletionResult,
+    Shell,
 )
 from argbuilder._error import (
     ArgumentConflict,
@@ -40,14 +34,14 @@ from argbuilder._error import (
     MissingRequiredArgument,
     MissingSubcommand,
     ParseFailure,
+    SubcommandConflict,
     TooFewValues,
     TooManyValues,
     UnknownArgument,
     ValueValidation,
 )
-from argbuilder._field import FieldAction, arg
 from argbuilder._matches import ArgMatches, ValueSource
-from argbuilder._spec import ArgAction
+from argbuilder._spec import ArgAction, ValueHint
 from argbuilder._style import Style
 from argbuilder._value_parser import Invalid, ValueParser, ValueParserLike
 
@@ -58,32 +52,29 @@ __all__ = [
     "ArgMatches",
     "ArgumentConflict",
     "Command",
+    "Completion",
+    "CompletionDirective",
+    "CompletionResult",
     "DisplayHelp",
     "DisplayHelpOnMissingArgumentOrSubcommand",
     "DisplayVersion",
     "Error",
     "ErrorKind",
-    "FieldAction",
     "Invalid",
     "InvalidSubcommand",
     "InvalidValue",
     "MissingRequiredArgument",
     "MissingSubcommand",
     "ParseFailure",
+    "Shell",
     "Style",
+    "SubcommandConflict",
     "TooFewValues",
     "TooManyValues",
     "UnknownArgument",
+    "ValueHint",
     "ValueParser",
     "ValueParserLike",
     "ValueSource",
     "ValueValidation",
-    "arg",
-    "args",
-    "from_arg_matches",
-    "parse",
-    "parse_from",
-    "parser",
-    "to_command",
-    "try_parse_from",
 ]

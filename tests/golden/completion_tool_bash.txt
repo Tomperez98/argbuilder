@@ -1,0 +1,21 @@
+# bash completion for tool
+_argbuilder_tool() {
+    local line entry directive=0
+    local -a candidates=()
+    while IFS= read -r line; do
+        case "$line" in
+            D$'\t'*) directive="${line#D$'\t'}" ;;
+            C$'\t'*) entry="${line#C$'\t'}"; candidates+=("${entry%%$'\t'*}") ;;
+        esac
+    done < <(command tool __complete "$COMP_CWORD" "${COMP_WORDS[@]}" 2>/dev/null)
+    COMPREPLY=("${candidates[@]}")
+    if type -t compopt >/dev/null 2>&1; then
+        if (( directive & 1 )); then compopt +o default 2>/dev/null; else compopt -o default 2>/dev/null; fi
+        if (( directive & 2 )); then compopt -o dirnames 2>/dev/null; fi
+    fi
+}
+if (( BASH_VERSINFO[0] < 4 )); then
+    complete -o default -F _argbuilder_tool tool
+else
+    complete -F _argbuilder_tool tool
+fi

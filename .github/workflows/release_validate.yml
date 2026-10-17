@@ -1,9 +1,9 @@
 name: Release (validate)
 
 # Check the latest release the way a user gets it: from PyPI, into a clean
-# environment. Runs at the end of every release, and daily, because PyPI and
+# environment. Runs at the end of every release, and weekly, because PyPI and
 # new Python releases change without this repo changing. GitHub emails
-# failures of the daily run to whoever last edited its cron line.
+# failures of the weekly run to whoever last edited its cron line.
 #
 # The checks run from main against the latest tag, so a bug in the checks
 # is fixed on main without cutting a release.
@@ -42,6 +42,8 @@ jobs:
           ref: main # the default shallow clone: tags are listed from the remote
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.12
@@ -74,6 +76,15 @@ jobs:
             git worktree add --quiet --detach released "$TAG"
             uv build --quiet --out-dir dist released
           fi
+          gh release download "$TAG" --dir manifest --pattern release-manifest.json || true
+      - name: Verify the download against the release manifest
+        run: |
+          if [ -f manifest/release-manifest.json ]; then
+            uv run --no-project python scripts/release.py verify-manifest \
+              manifest/release-manifest.json dist/
+          else
+            echo "::notice::${{ steps.latest.outputs.tag }} shipped no release manifest; skipping"
+          fi
       - name: Compare with PyPI, and check it is the latest there
         env:
           VERSION: ${{ steps.latest.outputs.version }}
@@ -89,7 +100,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -102,6 +113,8 @@ jobs:
           path: released
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.12
@@ -144,6 +157,8 @@ jobs:
           fi
       - if: steps.has.outputs.contract == 'yes'
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - if: steps.has.outputs.contract == 'yes'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:

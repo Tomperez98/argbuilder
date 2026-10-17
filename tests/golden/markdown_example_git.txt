@@ -9,6 +9,7 @@ A fictional versioning CLI
 * `clone` — Clones repos
 * `push` — Pushes things
 * `add` — Adds things [aliases: stage]
+* `completion` — Generate a shell completion script
 * `help` — Print this message or the help of the given subcommand(s)
 
 **Options:**
@@ -67,6 +68,20 @@ Adds things
 
 * `-v, --verbose...` — More output per occurrence
 * `--color <WHEN>` — Colorize output [default: auto] [possible values: always, auto, never]
+* `-h, --help` — Print help
+
+## `git completion`
+
+Generate a shell completion script
+
+**Usage:** `git completion [OPTIONS] <SHELL>`
+
+**Arguments:**
+
+* `<SHELL>` — Shell to generate completions for [possible values: bash, zsh, fish, powershell]
+
+**Options:**
+
 * `-h, --help` — Print help
 
 ## `git help`

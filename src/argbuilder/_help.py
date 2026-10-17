@@ -20,13 +20,18 @@ MIN_HELP_COLUMN = 20
 _NEXT_LINE_INDENT = 10
 
 
-def value_hint(arg: ResolvedArg) -> str:
+def value_hint(arg: ResolvedArg, *, equals: bool = False) -> str:
     name = f"<{arg.value_name}>"
     if arg.max_values == 1:
-        return name if arg.min_values == 1 else f"[{name}]"
-    if arg.min_values == arg.max_values:
-        return " ".join([name] * arg.min_values)
-    return f"{name}..." if arg.min_values >= 1 else f"[{name}]..."
+        hint = name if arg.min_values == 1 else f"[{name}]"
+    elif arg.min_values == arg.max_values:
+        hint = " ".join([name] * arg.min_values)
+    else:
+        hint = f"{name}..." if arg.min_values >= 1 else f"[{name}]..."
+    if not equals:
+        return hint
+    # `--color[=<WHEN>]`, not `--color=[<WHEN>]`: the '=' belongs to the value.
+    return f"[={hint[1:]}" if hint.startswith("[") else f"={hint}"
 
 
 def display_arg(arg: ResolvedArg) -> str:
@@ -35,7 +40,11 @@ def display_arg(arg: ResolvedArg) -> str:
         shown = f"<{arg.value_name}>{'...' if arg.is_multiple else ''}"
         return f"-- {shown}" if arg.last else shown
     flag = f"--{arg.long}" if arg.long is not None else f"-{arg.short}"
-    return f"{flag} {value_hint(arg)}" if takes_values(arg.action) else flag
+    if not takes_values(arg.action):
+        return flag
+    if arg.require_equals:
+        return f"{flag}{value_hint(arg, equals=True)}"
+    return f"{flag} {value_hint(arg)}"
 
 
 def render_usage(cmd: ResolvedCommand) -> str:
@@ -45,7 +54,7 @@ def render_usage(cmd: ResolvedCommand) -> str:
         parts.append("[OPTIONS]")
     parts.extend(display_arg(arg) for arg in options if arg.required)
     parts.extend(positional_label(arg) for arg in cmd.positionals if not arg.hide)
-    if cmd.subcommands:
+    if any(not sub.hidden for sub in cmd.subcommands.values()):
         parts.append("<COMMAND>" if cmd.subcommand_required else "[COMMAND]")
     return " ".join(parts)
 
@@ -66,8 +75,13 @@ def render_help(cmd: ResolvedCommand, style: Style = PLAIN) -> str:
         lines += [*_wrap(cmd.about, style.width), ""]
     lines.append(f"{style.header('Usage:')} {render_usage(cmd)}")
     if cmd.subcommands:
-        rows = [(name, subcommand_details(sub)) for name, sub in cmd.subcommands.items()]
-        lines += ["", style.header("Commands:"), *_table(rows, style)]
+        rows = [
+            (name, subcommand_details(sub))
+            for name, sub in cmd.subcommands.items()
+            if not sub.hidden
+        ]
+        if rows:
+            lines += ["", style.header("Commands:"), *_table(rows, style)]
     visible = [arg for arg in cmd.args if not arg.hide]
     positionals = [
         (positional_label(arg), arg_details(arg)) for arg in visible if arg.is_positional
@@ -99,6 +113,8 @@ def option_label(arg: ResolvedArg) -> str:
     else:
         flag = f"    --{arg.long}"
     if takes_values(arg.action):
+        if arg.require_equals:
+            return f"{flag}{value_hint(arg, equals=True)}"
         return f"{flag} {value_hint(arg)}"
     return f"{flag}..." if arg.action == "count" else flag
 

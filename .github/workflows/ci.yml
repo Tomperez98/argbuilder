@@ -33,6 +33,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.12
@@ -52,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     env:
       # Force uv to the matrix interpreter, overriding the repo's .python-version.
       UV_PYTHON: ${{ matrix.python-version }}
@@ -61,6 +63,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.12
@@ -70,6 +74,31 @@ jobs:
         run: mise run test
       - name: Install the wheel into a clean venv and run the examples
         run: mise run smoke
+
+  completion:
+    name: Completion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
+      - name: Install the shells the generated scripts target
+        run: sudo apt-get update && sudo apt-get install -y zsh fish shellcheck
+      - name: Check PowerShell is available
+        run: pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion'
+      - name: Completion engine and generated scripts
+        run: mise run test:completion
 
   # The contract (contract/): the spec judges this build, and the previous
   # release's API and spec judge it too (ship skill, COMPAT.md). The job
@@ -91,6 +120,8 @@ jobs:
           fetch-depth: 0 # the previous release tag and its contract
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
@@ -103,6 +134,8 @@ jobs:
         run: mise run contract:check
       - name: This build against the previous release's API and contract
         run: mise run contract:compat
+      - name: Build the release artifacts and manifest (dry run)
+        run: mise run release:dry-run
       # contract_report.yml posts this on the pull request. It runs with a
       # write token this job must never hold, so hand it data, not access.
       - name: Hand the report to contract_report.yml

@@ -24,6 +24,7 @@ from argbuilder import (
     Error,
     InvalidValue,
     MissingRequiredArgument,
+    SubcommandConflict,
     TooFewValues,
     TooManyValues,
     UnknownArgument,
@@ -124,6 +125,37 @@ def arity_over_subcommand() -> Command:
     )
 
 
+def subcommand_conflict_over_group() -> Command:
+    return (
+        Command("p")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("x").long("x").action("set_true"))
+        .arg(Arg("m").long("m").action("set_true"))
+        .arg(Arg("n").long("n").action("set_true"))
+        .group(ArgGroup("g").args(["m", "n"]))
+        .subcommand(Command("s"))
+    )
+
+
+def conditional_missing_over_arity() -> Command:
+    return (
+        Command("p")
+        .arg(Arg("mode").long("mode"))
+        .arg(Arg("out").long("out").required_if_eq("mode", "write"))
+        .arg(Arg("pair").num_args(2, 2))
+    )
+
+
+def conditional_missing_over_subcommand() -> Command:
+    return (
+        Command("p")
+        .subcommand(Command("s"))
+        .subcommand_required(True)
+        .arg(Arg("mode").long("mode"))
+        .arg(Arg("out").long("out").required_if_eq("mode", "write"))
+    )
+
+
 PRECEDENCE: list[tuple[str, Callable[[], Command], list[str], type[object]]] = [
     ("conflict over missing required", conflict_over_missing, ["--a", "--b"], ArgumentConflict),
     (
@@ -140,6 +172,24 @@ PRECEDENCE: list[tuple[str, Callable[[], Command], list[str], type[object]]] = [
         MissingRequiredArgument,
     ),
     ("positional arity over missing subcommand", arity_over_subcommand, ["1"], TooFewValues),
+    (
+        "subcommand conflict over group conflict",
+        subcommand_conflict_over_group,
+        ["--x", "--m", "--n", "s"],
+        SubcommandConflict,
+    ),
+    (
+        "conditional missing over arity",
+        conditional_missing_over_arity,
+        ["--mode", "write", "1"],
+        MissingRequiredArgument,
+    ),
+    (
+        "conditional missing over missing subcommand",
+        conditional_missing_over_subcommand,
+        ["--mode", "write"],
+        MissingRequiredArgument,
+    ),
 ]
 
 
@@ -157,6 +207,35 @@ def test_the_first_failure_wins(
 
 
 # -- environment-sourced failures carry the variable ----------------------------
+
+
+def test_direct_conflict_wins_over_exclusive() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("a").long("a").action("set_true").conflicts_with("b"))
+        .arg(Arg("b").long("b").action("set_true").exclusive(True))
+    )
+    assert err(cmd, "--a", "--b").kind == ArgumentConflict("--a", "--b")
+
+
+def test_exclusive_wins_over_a_group_and_a_subcommand_conflict() -> None:
+    grouped = (
+        Command("p")
+        .arg(Arg("e").long("e").action("set_true").exclusive(True))
+        .arg(Arg("m").long("m").action("set_true"))
+        .arg(Arg("n").long("n").action("set_true"))
+        .group(ArgGroup("g").args(["m", "n"]))
+    )
+    assert err(grouped, "--e", "--m", "--n").kind == ArgumentConflict("--e", "--m")
+
+    with_subcommand = (
+        Command("p")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("e").long("e").action("set_true").exclusive(True))
+        .arg(Arg("x").long("x").action("set_true"))
+        .subcommand(Command("s"))
+    )
+    assert err(with_subcommand, "--e", "--x", "s").kind == ArgumentConflict("--e", "--x")
 
 
 def test_a_short_env_value_reports_the_variable() -> None:

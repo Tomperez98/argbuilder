@@ -29,9 +29,8 @@ _EXAMPLES: dict[str, ModuleType] = {}
 def _import_example(name: str) -> ModuleType:
     """Import `examples/<name>.py` once per session, under a unique module name.
 
-    Registering in `sys.modules` lets dataclasses resolve their annotations;
-    caching keeps one class identity per example, so identity checks and
-    `match` statements over derived subcommands hold.
+    Registering in `sys.modules` lets the module's own imports resolve, and
+    caching keeps one module identity per session.
     """
     if name in _EXAMPLES:
         return _EXAMPLES[name]

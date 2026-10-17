@@ -7,10 +7,18 @@ import os
 import sys
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from argbuilder._arg import Arg, ArgGroup, _check_bool
 from argbuilder._build import build
+from argbuilder._completion import (
+    SHELLS,
+    CompletionResult,
+    Shell,
+    complete,
+    render_completion,
+    write_completion,
+)
 from argbuilder._docs import render_markdown
 from argbuilder._error import Error, ErrorKind
 from argbuilder._help import render_help, render_usage, render_version, usage_error
@@ -154,6 +162,21 @@ class Command:
     def subcommand_required(self, yes: bool) -> Command:
         return self._with(subcommand_required=_check_bool(repr(self), "subcommand_required", yes))
 
+    def args_conflicts_with_subcommands(self, yes: bool) -> Command:
+        """Make this command's own arguments mutually exclusive with its subcommands.
+
+        `stash --message wip` and `stash push file` both work;
+        `stash --message wip push file` is a user error. Defaults and
+        environment values do not trigger the conflict. Because a required
+        argument would make every subcommand unusable, combining this with a
+        required argument or required group is a definition bug.
+        """
+        return self._with(
+            args_conflicts_with_subcommands=_check_bool(
+                repr(self), "args_conflicts_with_subcommands", yes
+            ),
+        )
+
     def arg_required_else_help(self, yes: bool) -> Command:
         """With no arguments at all, print help to stderr and exit 2."""
         return self._with(
@@ -171,6 +194,26 @@ class Command:
         return self._with(
             disable_help_subcommand=_check_bool(repr(self), "disable_help_subcommand", yes),
         )
+
+    def completion_subcommand(self, yes: bool) -> Command:
+        """Add a visible `completion <SHELL>` command that prints a completion script.
+
+        Root commands only. The script is ephemeral: it is meant to be evaluated
+        or sourced by the current shell, for example
+        `eval "$(mycli completion bash)"`. No shell configuration is modified.
+        """
+        return self._with(
+            completion_subcommand=_check_bool(repr(self), "completion_subcommand", yes),
+        )
+
+    def hide(self, yes: bool) -> Command:
+        """Hide this subcommand from help, documentation, suggestions and completion.
+
+        It still parses when named explicitly, which is what internal commands
+        such as `__complete` need. Only subcommands can be hidden; calling this
+        on the root is a definition bug and panics at build time.
+        """
+        return self._with(hidden=_check_bool(repr(self), "hide", yes))
 
     # -- use ----------------------------------------------------------------
 
@@ -211,11 +254,59 @@ class Command:
         result = self.try_get_matches_from(argv, env)
         if isinstance(result, Error):
             result.exit()
+        self._write_completion_command(result)
         return result
 
     def get_matches(self) -> ArgMatches:
-        """Parse `sys.argv` with `os.environ`. The only read of process state."""
+        """Parse `sys.argv` with `os.environ`. The only read of process state.
+
+        Shell-completion scripts call the program as
+        `<name> __complete <cursor> <argv...>`; this edge answers that request
+        before parsing, so completion works without adding a visible command.
+        """
+        resolved = self._resolved()
+        if write_completion(resolved, sys.argv, sys.stdout):
+            raise SystemExit(0)
         return self.get_matches_from(sys.argv, os.environ)
+
+    def _write_completion_command(self, matches: ArgMatches) -> None:
+        """Print the generated script and exit when the `completion` command ran."""
+        if not self._resolved().completion_subcommand:
+            return
+        if matches.subcommand_name() != "completion":
+            return
+        sub = matches.subcommand_matches("completion")
+        invariant(sub is not None, "the completion subcommand matched but has no matches")
+        shell = cast("ArgMatches", sub).get_required("shell", str)
+        invariant(
+            shell in SHELLS,
+            f"completion shell {shell!r} is not one of {', '.join(SHELLS)}",
+        )
+        sys.stdout.write(render_completion(self._resolved(), cast("Shell", shell)))
+        sys.stdout.flush()
+        raise SystemExit(0)
+
+    def complete(
+        self,
+        argv: Iterable[str],
+        cursor: int | None = None,
+    ) -> CompletionResult:
+        """Candidates for the word at `cursor` in `argv` (0-based, like `COMP_CWORD`).
+
+        `argv` includes the binary name, exactly like `try_get_matches_from`.
+        `cursor` defaults to the last word. Pure: no process or terminal state,
+        and no file-system access.
+        """
+        return complete(self._resolved(), argv, cursor)
+
+    def render_completion(self, shell: Shell) -> str:
+        """A shell script for `bash`, `zsh`, `fish` or `powershell`.
+
+        The script calls this program's hidden `__complete` protocol, so it
+        needs no regeneration when subcommands or arguments change. Source it
+        from the shell's completion setup; see the README.
+        """
+        return render_completion(self._resolved(), shell)
 
     def render_help(self, style: Style = PLAIN) -> str:
         """Plain by default; pass a `Style` to color it and wrap it to a width."""
@@ -230,9 +321,9 @@ class Command:
 
         One `#` section for this command, one `##` section per subcommand at
         any depth, named by its full path. Content and visibility mirror
-        `render_help`: hidden args and hidden aliases stay out, and an
-        inherited global argument is documented again on each subcommand,
-        the same as `--help` shows it there.
+        `render_help`: hidden args, hidden aliases and hidden subcommands
+        stay out, and an inherited global argument is documented again on
+        each subcommand, the same as `--help` shows it there.
         """
         return render_markdown(self._resolved())
 

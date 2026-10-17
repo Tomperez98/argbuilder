@@ -26,6 +26,8 @@ type ValueSource = Literal["default_value", "env_variable", "command_line"]
 class MatchedArg:
     values: tuple[Any, ...]
     source: ValueSource
+    raws: tuple[str, ...] = ()
+    """The raw spellings behind `values`, for raw-value conditions such as `required_if_eq`."""
 
 
 class ArgMatches:

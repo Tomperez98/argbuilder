@@ -73,7 +73,7 @@ gh api repos/Tomperez98/argbuilder/rulesets --jq '.[].name'
    the commit, version, and changelog entry, and waits for a "go".
 7. **Watch validation.** After publishing, `release_validate.yml` downloads
    the release from PyPI, checks the bytes match what was built, installs on
-   Python 3.12–3.14, runs the released examples, and judges the wheel with
+   Python 3.12–3.15, runs the released examples, and judges the wheel with
    the contract that shipped. The same check runs weekly.
 
 ## What the automation already guarantees
@@ -84,6 +84,9 @@ Know these so you know what *not* to re-check by hand:
   `main`; a tag off-mainline is refused before anything is built.
 - `dist/` holds exactly this version's wheel and sdist; the wheel is
   installed into a clean venv and the examples run (`mise run smoke`).
+- `release-manifest.json` records the version, the tag commit, and a sha256
+  and size for every shipped file, including the contract spec, driver and
+  plan. It is attached to the GitHub release next to the artifacts.
 - `preflight` refuses a version PyPI already has with *different* bytes. If
   PyPI already has *some* of these exact bytes, the release resumes and
   uploads the rest — no version is burned.

@@ -7,11 +7,15 @@ rather than imported from the installed package.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import sys
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import pytest
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -77,6 +81,46 @@ def test_shipped_changelog_covers_the_current_version() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     source = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert release.changelog_entry(source, project["project"]["version"]) is not None
+
+
+def test_manifest_records_checksums_and_the_commit(tmp_path: Path) -> None:
+    wheel = tmp_path / "argbuilder-2.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"wheel")
+    spec = tmp_path / "GitSpec.cs"
+    spec.write_bytes(b"spec")
+    record = release.manifest("2.0.0", "0" * 40, {"dist/wheel": wheel, "contract/spec": spec})
+    assert record["package"] == "argbuilder"
+    assert record["version"] == "2.0.0"
+    assert record["commit"] == "0" * 40
+    assert record["files"] == [
+        {
+            "path": "contract/spec",
+            "sha256": hashlib.sha256(b"spec").hexdigest(),
+            "size": 4,
+        },
+        {
+            "path": "dist/wheel",
+            "sha256": hashlib.sha256(b"wheel").hexdigest(),
+            "size": 5,
+        },
+    ]
+
+
+def test_verify_manifest_checks_downloaded_artifacts(tmp_path: Path) -> None:
+    artifact = tmp_path / "dist" / "argbuilder-2.0.0-py3-none-any.whl"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"wheel")
+    record = release.manifest(
+        "2.0.0", "0" * 40, {"dist/argbuilder-2.0.0-py3-none-any.whl": artifact}
+    )
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(json.dumps(record), encoding="utf-8")
+
+    release.verify_manifest(manifest, tmp_path, "dist/")
+
+    artifact.write_bytes(b"tampered")
+    with pytest.raises(SystemExit):
+        release.verify_manifest(manifest, tmp_path, "dist/")
 
 
 def test_diff_base_is_shortened_for_display() -> None:

@@ -6,6 +6,8 @@ precondition: it exits non-zero with the artifact name and both values.
 
     python scripts/release.py tag                       # tag origin/main and push the tag
     python scripts/release.py check-dist VERSION        # dist/ holds exactly this release
+    python scripts/release.py manifest VERSION COMMIT   # record checksums and the contract
+    python scripts/release.py verify-manifest FILE [PREFIX]  # check downloaded files
     python scripts/release.py smoke VERSION EXAMPLES    # the installed package works
     python scripts/release.py preflight VERSION         # safe to publish dist/ to PyPI
     python scripts/release.py verify-pypi VERSION       # PyPI serves exactly dist/
@@ -31,6 +33,13 @@ from typing import NoReturn
 PACKAGE = "argbuilder"
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
+MANIFEST = ROOT / "release-manifest.json"
+CONTRACT_FILES = (
+    "contract/Contract/Contract.csproj",
+    "contract/Contract/GitSpec.cs",
+    "contract/Contract/Program.cs",
+    "contract/driver.py",
+)
 PYPI = "https://pypi.org/pypi"
 
 # Network calls are expected to fail sometimes: retry a bounded number of
@@ -112,6 +121,19 @@ def require_changelog(version: str, source: str | None = None) -> str:
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def manifest(version: str, commit: str, files: dict[str, Path]) -> dict[str, object]:
+    """The release record: package, version, commit, and a checksum per file."""
+    return {
+        "package": PACKAGE,
+        "version": version,
+        "commit": commit,
+        "files": [
+            {"path": name, "sha256": sha256(path), "size": path.stat().st_size}
+            for name, path in sorted(files.items())
+        ],
+    }
 
 
 def dist_digests() -> dict[str, str]:
@@ -196,6 +218,63 @@ def cmd_check_dist(version: str) -> None:
         fail(f"dist/ holds {sorted(found)}, expected {sorted(expected_files(version))}")
     for name, digest in found.items():
         say(f"{digest}  {name}")
+
+
+def cmd_manifest(version: str, commit: str) -> None:
+    """Write release-manifest.json: what this build ships, and the commit it came from."""
+    parse_version(version)
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        fail(f"commit {commit!r} is not a full 40-character git SHA")
+    cmd_check_dist(version)
+    paths = {f"dist/{name}": DIST / name for name in expected_files(version)}
+    for name in CONTRACT_FILES:
+        path = ROOT / name
+        if not path.is_file():
+            fail(f"contract file {name} is missing; a release ships its contract")
+        paths[name] = path
+    plan = ROOT / "contract-plan.json"
+    if not plan.is_file():
+        fail("contract-plan.json is missing; export the contract plan before the manifest")
+    paths["contract-plan.json"] = plan
+    MANIFEST.write_text(
+        json.dumps(manifest(version, commit, paths), indent=2) + "\n", encoding="utf-8"
+    )
+    say(f"{MANIFEST.name}: {len(paths)} files for {PACKAGE} {version} at {commit[:12]}")
+
+
+def verify_manifest(path: Path, root: Path = ROOT, prefix: str = "") -> None:
+    """Check files against a release manifest, optionally only those under `prefix`."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot read manifest {path}: {error}")
+    entries = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        fail(f"manifest {path} has no files list")
+    checked = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            fail(f"manifest {path} has a non-object file entry")
+        name = entry.get("path")
+        expected = entry.get("sha256")
+        if not isinstance(name, str) or not isinstance(expected, str):
+            fail(f"manifest {path} has a file entry without path/sha256")
+        if prefix and not name.startswith(prefix):
+            continue
+        file = root / name
+        if not file.is_file():
+            fail(f"{name} is listed in the manifest but is missing")
+        digest = sha256(file)
+        if digest != expected:
+            fail(f"{name}: sha256 {digest}, manifest {expected}")
+        checked += 1
+    if checked == 0:
+        fail(f"manifest {path} lists nothing under {prefix!r}")
+    say(f"{checked} files match {path}")
+
+
+def cmd_verify_manifest(path: str, prefix: str = "") -> None:
+    verify_manifest(Path(path), ROOT, prefix)
 
 
 def cmd_smoke(version: str, examples: str) -> None:
@@ -289,6 +368,12 @@ def main(argv: list[str]) -> None:
             cmd_tag()
         case ["check-dist", version]:
             cmd_check_dist(version)
+        case ["manifest", version, commit]:
+            cmd_manifest(version, commit)
+        case ["verify-manifest", path]:
+            cmd_verify_manifest(path)
+        case ["verify-manifest", path, prefix]:
+            cmd_verify_manifest(path, prefix)
         case ["smoke", version, examples]:
             cmd_smoke(version, examples)
         case ["preflight", version]:

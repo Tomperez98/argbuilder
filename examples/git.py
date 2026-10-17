@@ -15,6 +15,7 @@ def cli() -> Command:
         Command("git")
         .about("A fictional versioning CLI")
         .version("1.0.0")
+        .completion_subcommand(True)
         .subcommand_required(True)
         .arg(
             Arg("verbose")

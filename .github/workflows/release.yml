@@ -52,6 +52,8 @@ jobs:
           filter: tree:0
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.12
@@ -96,6 +98,18 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: uv run --no-project python scripts/release.py notes "$VERSION" > notes.md
+      - name: Summarize the release for the approval
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## argbuilder $VERSION"
+            echo
+            echo "- Tag: ${{ github.ref_name }}"
+            echo "- Commit: $(git rev-parse HEAD)"
+            echo
+            cat notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
       # Ship the contract with the release (COMPAT.md rule 4). The tag holds
       # the spec and driver; the plan records exactly which calls this
       # release's contract makes, so a later run can be compared with it.
@@ -104,6 +118,11 @@ jobs:
           global-json-file: global.json
       - name: Export the contract's test plan
         run: dotnet run --project contract/Contract -- export contract-plan.json
+      - name: Write the release manifest
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          uv run --no-project python scripts/release.py manifest "$VERSION" "$(git rev-parse HEAD)"
 
       # These are the bytes that were just tested; publish uploads them as-is.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -120,6 +139,11 @@ jobs:
         with:
           name: contract
           path: contract-plan.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: manifest
+          path: release-manifest.json
           if-no-files-found: error
 
   publish:
@@ -139,6 +163,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.12
@@ -148,6 +174,12 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: manifest
+          path: manifest/
+      - name: Verify the downloaded artifacts against the build manifest
+        run: uv run --no-project python scripts/release.py verify-manifest manifest/release-manifest.json dist/
       # Checked again: PyPI can change while the deployment waits for approval.
       - name: Check PyPI again, right before uploading
         env:
@@ -175,6 +207,9 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: contract
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: manifest
       - name: Create, upload, then publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,7 +229,7 @@ jobs:
               --title "argbuilder $VERSION" \
               --notes-file notes.md --generate-notes
           fi
-          gh release upload "$TAG" --clobber dist/*.whl dist/*.tar.gz contract-plan.json
+          gh release upload "$TAG" --clobber dist/*.whl dist/*.tar.gz contract-plan.json release-manifest.json
           gh release edit "$TAG" --draft=false --latest
 
   # Check what users actually get, from the outside: PyPI serves exactly

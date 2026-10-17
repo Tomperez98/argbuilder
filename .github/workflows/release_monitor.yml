@@ -1,0 +1,44 @@
+name: Release monitor
+
+# A release failure is already emailed to the person who pushed the tag, but
+# that leaves no durable record. Keep one tracking issue per failing release,
+# like the scheduled checks (MONITOR.md rule 4). This workflow runs no release
+# code; it only reads the failed run's conclusion and URL.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update, or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ github.event.workflow_run.conclusion != 'success' }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          title="Release is failing"
+          issue="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+          if [ "$FAILED" = true ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "Still failing for $REF: $RUN_URL"
+            else
+              gh issue create --title "$title" --body "$(printf '%s\n' \
+                "The Release workflow failed for $REF: $RUN_URL" "" \
+                "Nothing is published until every job passes. Use 'Re-run failed jobs' after" \
+                "fixing the cause (see RELEASING.md), or close this with the reason.")"
+            fi
+          elif [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Green again: $RUN_URL"
+          fi

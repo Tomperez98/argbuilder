@@ -1,6 +1,6 @@
 [project]
 name = "argbuilder"
-version = "1.1.1"
+version = "2.0.0"
 description = "Typed command-line parsing where definition bugs fail at once and user mistakes return values. No dependencies."
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Typing :: Typed",
 ]
 requires-python = ">=3.12"
@@ -39,7 +40,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.17,<0.13.0"]
+requires = ["uv_build==0.12.17"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
@@ -47,6 +48,9 @@ build-backend = "uv_build"
 # second `tests/` tree and its own conftest, which would collide otherwise.
 testpaths = ["tests"]
 addopts = "--cov=src --cov-report=term-missing --cov-report=term"
+markers = [
+    "shell: runs generated completion scripts in a real shell",
+]
 
 [tool.coverage.run]
 branch = true

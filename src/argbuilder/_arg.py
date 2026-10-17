@@ -7,7 +7,14 @@ from collections.abc import Iterable
 from typing import Any, overload
 
 from argbuilder._invariant import bug, invariant
-from argbuilder._spec import ArgAction, ArgSpec, GroupSpec, check_action
+from argbuilder._spec import (
+    ArgAction,
+    ArgSpec,
+    GroupSpec,
+    ValueHint,
+    check_action,
+    check_value_hint,
+)
 from argbuilder._value_parser import ValueParserLike, into_value_parser
 
 
@@ -132,6 +139,14 @@ class Arg:
         """
         return self._with(value_parser=into_value_parser(parser))
 
+    def value_hint(self, hint: ValueHint) -> Arg:
+        """Tell shell completion what kind of value this is.
+
+        One of `"any_path"`, `"file"`, `"dir"` or `"executable"`. It only
+        affects generated completions; parsing ignores it.
+        """
+        return self._with(value_hint=check_value_hint(self._owner, hint))
+
     @overload
     def num_args(self, exactly: int, /) -> Arg: ...
     @overload
@@ -195,9 +210,76 @@ class Arg:
     def requires(self, id: str) -> Arg:
         return self._with(requires=self._spec.requires | {_check_id("Arg", id)})
 
+    def overrides_with(self, id: str) -> Arg:
+        """Last one wins: using this argument removes every earlier `id` value.
+
+        Only command-line values are removed. If `id` has an environment value
+        or a default, it becomes the effective value again. Both arguments must
+        be global or both local, and an override/conflict pair is a definition
+        bug because the rules contradict each other.
+        """
+        return self._with(overrides_with=self._spec.overrides_with | {_check_id("Arg", id)})
+
+    def overrides_with_all(self, ids: Iterable[str]) -> Arg:
+        _check_iterable(self._owner, "overrides_with_all", ids)
+        checked = {_check_id("Arg", id) for id in ids}
+        return self._with(overrides_with=self._spec.overrides_with | checked)
+
+    def exclusive(self, yes: bool) -> Arg:
+        """Cannot be used with any other explicit argument."""
+        return self._with(exclusive=_check_bool(self._owner, "exclusive", yes))
+
+    def required_unless_present(self, id: str) -> Arg:
+        """Required unless `id` has a value from any source (command line, env or default).
+
+        Repeated calls accumulate; the argument is required unless *any* of the
+        named arguments is present. Combining this with `required(True)` or with
+        `required_if_eq()` on the same argument is a definition bug.
+        """
+        return self._with(
+            required_unless_present=self._spec.required_unless_present | {_check_id("Arg", id)},
+        )
+
+    def required_if_eq(self, id: str, value: str) -> Arg:
+        """Required when `id`'s effective raw value equals `value`.
+
+        The comparison uses the raw spelling from the command line, environment
+        or default, not the parsed value. Repeated calls accumulate; the
+        argument is required when *any* pair matches. `id` must be a
+        value-taking argument.
+        """
+        invariant(
+            isinstance(value, str),
+            f"{self._owner}.required_if_eq() takes a str value, got {value!r}",
+        )
+        return self._with(
+            required_if_eq=(*self._spec.required_if_eq, (_check_id("Arg", id), value)),
+        )
+
     def allow_hyphen_values(self, yes: bool) -> Arg:
         """Accept values starting with `-`, such as `-5`, without `=` or `--`."""
         return self._with(allow_hyphen_values=_check_bool(self._owner, "allow_hyphen_values", yes))
+
+    def allow_negative_numbers(self, yes: bool) -> Arg:
+        """Accept negative numeric values such as `-5` without accepting other hyphens.
+
+        Only a value-taking argument can use this. `-x` and `--flag` still parse
+        as flags; the numeric grammar is `-5`, `-0.5`, `-1.5e-3`.
+        """
+        return self._with(
+            allow_negative_numbers=_check_bool(self._owner, "allow_negative_numbers", yes),
+        )
+
+    def require_equals(self, yes: bool) -> Arg:
+        """Only accept the value with `=`: `--color=always` or `-c=always`.
+
+        Without it, `--color always` would also work, and for an optional-value
+        argument (`num_args(0, 1)`) the parser would consume the next token as
+        the value. `--color` and `-c` still select the argument; they use
+        `default_missing_value()` when one is set, or no value when
+        `num_args` allows zero.
+        """
+        return self._with(require_equals=_check_bool(self._owner, "require_equals", yes))
 
     def value_delimiter(self, char: str) -> Arg:
         """Split each value on `char`: `--tags a,b,c`."""
@@ -206,6 +288,18 @@ class Arg:
             f"{self._owner}.value_delimiter() takes one character, got {char!r}",
         )
         return self._with(value_delimiter=char)
+
+    def trailing_var_arg(self, yes: bool) -> Arg:
+        """Capture every token from the first one onward, without requiring `--`.
+
+        For wrappers: `mytool run cargo build --release` stores
+        `("cargo", "build", "--release")` in this positional. It must be the
+        final positional with an unbounded `num_args`, and cannot be combined
+        with `last()` or `allow_hyphen_values()`.
+        """
+        return self._with(
+            trailing_var_arg=_check_bool(self._owner, "trailing_var_arg", yes),
+        )
 
     def last(self, yes: bool) -> Arg:
         """Only ever filled after a literal `--`; every token after it is taken verbatim.

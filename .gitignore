@@ -21,6 +21,8 @@ mutants/
 # Contract runs: generated plan and trace, .NET build output, compat scratch
 contract/plan.json
 contract/trace.json
+contract-plan.json
+release-manifest.json
 contract/Contract/bin/
 contract/Contract/obj/
 .contract-compat/
