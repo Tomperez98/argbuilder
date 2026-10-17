@@ -443,7 +443,7 @@ def _visible_subcommand_names(cmd: ResolvedCommand) -> list[str]:
     return [
         name
         for name, canonical in cmd.subcommand_names.items()
-        if name not in cmd.subcommands[canonical].aliases
+        if not cmd.subcommands[canonical].hidden and name not in cmd.subcommands[canonical].aliases
     ]
 
 

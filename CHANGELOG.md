@@ -16,6 +16,22 @@ section here at all.
 
 ## [Unreleased]
 
+### Added
+
+- Shell completion for bash, zsh, fish and PowerShell.
+  `Command.render_completion(shell)` emits a thin adapter that calls a hidden
+  `__complete` protocol, answered by `get_matches()` before parsing.
+  `Command.complete(argv, cursor)` exposes the pure candidate engine, and
+  `Arg.value_hint(...)` tells it about files, directories and executables.
+  Hidden arguments and subcommands are omitted.
+- `Command.hide(True)` hides a subcommand from help, Markdown docs, typo
+  suggestions and completion while keeping it parseable by name.
+- `Command.completion_subcommand(True)` adds a visible, root-only
+  `completion <SHELL>` command. `mycli completion bash` prints a script
+  suitable for `eval "$(mycli completion bash)"`, and
+  `get_matches_from()` handles printing and exit just like `get_matches()`.
+  No shell configuration is modified.
+
 ## [2.0.0] - 2026-10-16
 
 ### Changed (breaking)

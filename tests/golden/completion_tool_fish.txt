@@ -1,0 +1,29 @@
+function __argbuilder_tool_prepare
+    set -l tokens (commandline -opc)
+    set -l current (commandline -ct)
+    set -l argv $tokens
+    set -a argv "$current"
+    set -l cursor (count $tokens)
+    set -g __argbuilder_tool_results
+    set -l directive 0
+    for line in (command tool __complete $cursor $argv 2>/dev/null)
+        set -l parts (string split -m 1 \t -- $line)
+        if test (count $parts) -lt 2
+            continue
+        end
+        if test "$parts[1]" = D
+            set directive "$parts[2]"
+        else if test "$parts[1]" = C
+            set -a __argbuilder_tool_results "$parts[2]"
+        end
+    end
+    if test (count $__argbuilder_tool_results) -eq 0
+        if test (math "$directive % 2") -ne 0
+            return 0
+        else
+            return 1
+        end
+    end
+    return 0
+end
+complete -c tool -f -a '$__argbuilder_tool_results' -n '__argbuilder_tool_prepare'

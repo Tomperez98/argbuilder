@@ -45,7 +45,7 @@ def render_usage(cmd: ResolvedCommand) -> str:
         parts.append("[OPTIONS]")
     parts.extend(display_arg(arg) for arg in options if arg.required)
     parts.extend(positional_label(arg) for arg in cmd.positionals if not arg.hide)
-    if cmd.subcommands:
+    if any(not sub.hidden for sub in cmd.subcommands.values()):
         parts.append("<COMMAND>" if cmd.subcommand_required else "[COMMAND]")
     return " ".join(parts)
 
@@ -66,8 +66,13 @@ def render_help(cmd: ResolvedCommand, style: Style = PLAIN) -> str:
         lines += [*_wrap(cmd.about, style.width), ""]
     lines.append(f"{style.header('Usage:')} {render_usage(cmd)}")
     if cmd.subcommands:
-        rows = [(name, subcommand_details(sub)) for name, sub in cmd.subcommands.items()]
-        lines += ["", style.header("Commands:"), *_table(rows, style)]
+        rows = [
+            (name, subcommand_details(sub))
+            for name, sub in cmd.subcommands.items()
+            if not sub.hidden
+        ]
+        if rows:
+            lines += ["", style.header("Commands:"), *_table(rows, style)]
     visible = [arg for arg in cmd.args if not arg.hide]
     positionals = [
         (positional_label(arg), arg_details(arg)) for arg in visible if arg.is_positional

@@ -16,6 +16,12 @@ from __future__ import annotations
 
 from argbuilder._arg import Arg, ArgGroup
 from argbuilder._command import Command
+from argbuilder._completion import (
+    Completion,
+    CompletionDirective,
+    CompletionResult,
+    Shell,
+)
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -34,7 +40,7 @@ from argbuilder._error import (
     ValueValidation,
 )
 from argbuilder._matches import ArgMatches, ValueSource
-from argbuilder._spec import ArgAction
+from argbuilder._spec import ArgAction, ValueHint
 from argbuilder._style import Style
 from argbuilder._value_parser import Invalid, ValueParser, ValueParserLike
 
@@ -45,6 +51,9 @@ __all__ = [
     "ArgMatches",
     "ArgumentConflict",
     "Command",
+    "Completion",
+    "CompletionDirective",
+    "CompletionResult",
     "DisplayHelp",
     "DisplayHelpOnMissingArgumentOrSubcommand",
     "DisplayVersion",
@@ -56,10 +65,12 @@ __all__ = [
     "MissingRequiredArgument",
     "MissingSubcommand",
     "ParseFailure",
+    "Shell",
     "Style",
     "TooFewValues",
     "TooManyValues",
     "UnknownArgument",
+    "ValueHint",
     "ValueParser",
     "ValueParserLike",
     "ValueSource",

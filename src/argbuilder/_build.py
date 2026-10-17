@@ -13,11 +13,13 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from argbuilder._invariant import bug, invariant
-from argbuilder._spec import ArgAction, ArgSpec, CommandSpec, takes_values
+from argbuilder._spec import SHELLS, ArgAction, ArgSpec, CommandSpec, takes_values
 from argbuilder._value_parser import Invalid, ValueParser
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
+
+    from argbuilder._spec import ValueHint
 
 MAX_COMMAND_DEPTH = 32
 """Subcommand nesting bound. A deeper tree is a construction bug, not a real CLI."""
@@ -46,6 +48,21 @@ _HELP_SUBCOMMAND = CommandSpec(
 )
 """Added to every command with subcommands. The parser turns its matches into help."""
 
+_COMPLETION_SUBCOMMAND = CommandSpec(
+    name="completion",
+    about="Generate a shell completion script",
+    args=(
+        ArgSpec(
+            id="shell",
+            value_name="SHELL",
+            required=True,
+            value_parser=ValueParser.choices(*SHELLS),
+            help="Shell to generate completions for",
+        ),
+    ),
+)
+"""Added by `completion_subcommand(True)`; the process edge prints its script."""
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ResolvedArg:
@@ -72,6 +89,7 @@ class ResolvedArg:
     last: bool
     hide: bool
     global_: bool
+    value_hint: ValueHint | None
     aliases: tuple[str, ...]
     visible_aliases: tuple[str, ...]
     short_aliases: tuple[str, ...]
@@ -131,6 +149,8 @@ class ResolvedCommand:
     """Every name or alias that selects a subcommand, to its canonical name."""
     help_subcommand: bool
     """`subcommands["help"]` is the automatic one, which prints help instead of matching."""
+    completion_subcommand: bool
+    """`completion_subcommand(True)` opted into the automatic `completion` command."""
     aliases: tuple[str, ...]
     visible_aliases: tuple[str, ...]
     inherited: frozenset[str]
@@ -139,6 +159,7 @@ class ResolvedCommand:
     """Every environment variable this command or a subcommand below it reads."""
     subcommand_required: bool
     arg_required_else_help: bool
+    hidden: bool
     help_hint: str | None
     """How errors point at help, e.g. `'--help'`; None when help is disabled."""
 
@@ -178,6 +199,10 @@ def _build(
     invariant(
         depth > 0 or not (spec.aliases or spec.visible_aliases),
         f"{where}: aliases only apply to subcommands",
+    )
+    invariant(
+        depth > 0 or not spec.hidden,
+        f"{where}: hide() only applies to subcommands; a top-level command is never hidden",
     )
 
     args = _resolve_args(spec, where, inherited)
@@ -221,12 +246,14 @@ def _build(
         subcommands=MappingProxyType(subcommands),
         subcommand_names=MappingProxyType(subcommand_names),
         help_subcommand=help_subcommand,
+        completion_subcommand=spec.completion_subcommand,
         aliases=spec.aliases,
         visible_aliases=spec.visible_aliases,
         inherited=frozenset(arg.id for arg in inherited),
         env_names=env_names,
         subcommand_required=spec.subcommand_required,
         arg_required_else_help=spec.arg_required_else_help,
+        hidden=spec.hidden,
         help_hint=None if help_arg is None else _help_hint(help_arg),
     )
 
@@ -340,6 +367,10 @@ def _resolve_subcommands(
     where: str,
 ) -> tuple[dict[str, ResolvedCommand], dict[str, str], bool]:
     """Build the subcommands, index every name and alias, and add the automatic `help` subcommand."""
+    invariant(
+        depth == 0 or not spec.completion_subcommand,
+        f"{where}: completion_subcommand(True) only applies to the root command",
+    )
     subcommands: dict[str, ResolvedCommand] = {}
     subcommand_names: dict[str, str] = {}
     for sub in spec.subcommands:
@@ -355,6 +386,14 @@ def _resolve_subcommands(
             )
             subcommand_names[name] = sub.name
         subcommands[sub.name] = _build(sub, path, depth + 1, globals_)
+    if spec.completion_subcommand:
+        invariant(
+            "completion" not in subcommand_names,
+            f"{where}: subcommand name 'completion' is already used; "
+            f"completion_subcommand(True) adds one automatically",
+        )
+        subcommands["completion"] = _build(_COMPLETION_SUBCOMMAND, path, depth + 1, ())
+        subcommand_names["completion"] = "completion"
     invariant(
         not spec.subcommand_required or len(subcommands) > 0,
         f"{where}: subcommand_required(True) but no subcommands are defined",
@@ -411,6 +450,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
         last=spec.last,
         hide=spec.hide,
         global_=spec.global_,
+        value_hint=spec.value_hint,
         aliases=spec.aliases,
         visible_aliases=spec.visible_aliases,
         short_aliases=spec.short_aliases,
@@ -506,6 +546,7 @@ def _resolve_flag_arg(
             ("value_delimiter", spec.value_delimiter is not None),
             ("allow_hyphen_values", spec.allow_hyphen_values),
             ("value_name", spec.value_name is not None),
+            ("value_hint", spec.value_hint is not None),
             ("last", spec.last),
         )
         if is_set

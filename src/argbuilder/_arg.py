@@ -7,7 +7,14 @@ from collections.abc import Iterable
 from typing import Any, overload
 
 from argbuilder._invariant import bug, invariant
-from argbuilder._spec import ArgAction, ArgSpec, GroupSpec, check_action
+from argbuilder._spec import (
+    ArgAction,
+    ArgSpec,
+    GroupSpec,
+    ValueHint,
+    check_action,
+    check_value_hint,
+)
 from argbuilder._value_parser import ValueParserLike, into_value_parser
 
 
@@ -131,6 +138,14 @@ class Arg:
         a list or set of possible values.
         """
         return self._with(value_parser=into_value_parser(parser))
+
+    def value_hint(self, hint: ValueHint) -> Arg:
+        """Tell shell completion what kind of value this is.
+
+        One of `"any_path"`, `"file"`, `"dir"` or `"executable"`. It only
+        affects generated completions; parsing ignores it.
+        """
+        return self._with(value_hint=check_value_hint(self._owner, hint))
 
     @overload
     def num_args(self, exactly: int, /) -> Arg: ...

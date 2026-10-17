@@ -75,6 +75,31 @@ jobs:
       - name: Install the wheel into a clean venv and run the examples
         run: mise run smoke
 
+  completion:
+    name: Completion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.12.17"
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.12
+          install: "false" # mise only runs tasks; uv comes from setup-uv
+          cache: false
+      - name: Install the shells the generated scripts target
+        run: sudo apt-get update && sudo apt-get install -y zsh fish shellcheck
+      - name: Check PowerShell is available
+        run: pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion'
+      - name: Completion engine and generated scripts
+        run: mise run test:completion
+
   # The contract (contract/): the spec judges this build, and the previous
   # release's API and spec judge it too (ship skill, COMPAT.md). The job
   # summary carries the label and the promises that changed (CI.md rule 10).

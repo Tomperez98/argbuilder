@@ -1,11 +1,11 @@
 """Markdown documentation, generated from a resolved command tree.
 
 Reuses `_help.py`'s labels and detail strings verbatim, so `render_markdown`
-can never quietly drift from `render_help`: a hidden arg stays hidden, an
-inherited global repeats on every subcommand exactly as it does in
-`--help`, and the auto `help` subcommand gets a section the same as any
-other. One command is one section: the root gets a level-1 heading, and
-every command below it gets a level-2 heading named by its full path
+can never quietly drift from `render_help`: a hidden arg or subcommand stays
+hidden, an inherited global repeats on every subcommand exactly as it does in
+`--help`, and the auto `help` subcommand gets a section the same as any other.
+One command is one section: the root gets a level-1 heading, and every command
+below it gets a level-2 heading named by its full path
 (`git remote add`), rather than nesting headings further — a real tree can
 be deeper than Markdown has heading levels for.
 """
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from argbuilder._build import descendants
 from argbuilder._help import (
     arg_details,
     option_label,
@@ -24,14 +23,26 @@ from argbuilder._help import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from argbuilder._build import ResolvedCommand
 
 
 def render_markdown(cmd: ResolvedCommand) -> str:
-    sections = [_section(cmd, top=True), *(_section(sub, top=False) for sub in descendants(cmd))]
+    sections = [
+        _section(cmd, top=True),
+        *(_section(sub, top=False) for sub in _visible_descendants(cmd)),
+    ]
     return "\n\n".join(sections) + "\n"
+
+
+def _visible_descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
+    """Like `descendants`, but skips hidden subcommands and their whole subtree."""
+    for sub in cmd.subcommands.values():
+        if sub.hidden:
+            continue
+        yield sub
+        yield from _visible_descendants(sub)
 
 
 def _section(cmd: ResolvedCommand, *, top: bool) -> str:
@@ -42,8 +53,13 @@ def _section(cmd: ResolvedCommand, *, top: bool) -> str:
     lines += ["", f"**Usage:** `{render_usage(cmd)}`"]
 
     if cmd.subcommands:
-        rows = [(name, subcommand_details(sub)) for name, sub in cmd.subcommands.items()]
-        lines += ["", "**Commands:**", "", *_bullets(rows)]
+        rows = [
+            (name, subcommand_details(sub))
+            for name, sub in cmd.subcommands.items()
+            if not sub.hidden
+        ]
+        if rows:
+            lines += ["", "**Commands:**", "", *_bullets(rows)]
 
     visible = [arg for arg in cmd.args if not arg.hide]
     positionals = [

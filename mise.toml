@@ -20,7 +20,12 @@ run = "uv run --no-sync ty check"
 [tasks.test]
 description = "Run the test suite"
 depends = ["sync"]
-run = "uv run --no-sync pytest -q"
+run = "uv run --no-sync pytest -q -m 'not shell'"
+
+[tasks."test:completion"]
+description = "Run generated completion scripts in installed shells"
+depends = ["sync"]
+run = "uv run --no-sync pytest -q -o addopts= tests/test_completion_shells.py -m shell"
 
 [tasks.mutation]
 description = "Mutation-test the package (mutmut; local, informational)"
@@ -53,7 +58,7 @@ depends = ["lint", "format", "typecheck"]
 
 [tasks.ci]
 description = "The full suite: the same command CI runs"
-depends = ["ci:fast", "test", "smoke", "contract:check", "contract:compat", "release:dry-run"]
+depends = ["ci:fast", "test", "test:completion", "smoke", "contract:check", "contract:compat", "release:dry-run"]
 
 [tasks."release:dry-run"]
 description = "Build every release artifact, including the manifest, without publishing"

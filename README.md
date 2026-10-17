@@ -144,14 +144,124 @@ assert "\x1b[" not in cli().render_help()
 print(cli().render_help(Style(color=True, width=60)))
 ```
 
+## Shell completion
+
+### The `completion` command
+
+Enable a visible `completion <SHELL>` command with one builder call on the
+root command:
+
+```python
+cli = Command("mycli").completion_subcommand(True)
+```
+
+Then load completion for the current shell session, with no files to copy:
+
+```bash
+# bash
+eval "$(mycli completion bash)"
+
+# zsh
+eval "$(mycli completion zsh)"
+
+# fish
+mycli completion fish | source
+
+# PowerShell
+mycli completion powershell | Out-String | Invoke-Expression
+```
+
+Nothing is written to `~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish` or
+`$PROFILE`; completion lasts until the session ends. To keep it, source the
+same command from a startup file or install a generated script where the
+shell looks for completions.
+
+The command is opt-in, listed in help, and accepted only on the root command;
+a nested `completion_subcommand(True)` is a definition bug. The executable
+must be on `PATH` under the same name as `Command(...)`: running a file as
+`python mycli.py` does not create a `mycli` executable.
+
+`get_matches()` and `get_matches_from()` print the script to stdout and exit 0.
+`try_get_matches_from()` stays pure: it returns the parsed `ArgMatches` and
+never prints or exits. A custom parser that only calls `try_get_matches_from()`
+must call `render_completion()` itself.
+
+### Generated scripts
+
+`cmd.render_completion(shell)` returns a completion script for `bash`, `zsh`,
+`fish` or `powershell`. The script is a thin adapter: it calls the program as
+`tool __complete <cursor> <argv...>`, and `get_matches()` answers that request
+before parsing. There is no hidden command to add, and no regeneration step in
+the hot path.
+
+Generate the script wherever you already generate docs:
+
+```python
+from pathlib import Path
+
+command = cli()
+Path("tool.bash").write_text(command.render_completion("bash"))
+Path("_tool").write_text(command.render_completion("zsh"))
+Path("tool.fish").write_text(command.render_completion("fish"))
+Path("tool.ps1").write_text(command.render_completion("powershell"))
+```
+
+Install it the way each shell expects:
+
+- **bash**: `source tool.bash` from `~/.bashrc`, or put it in
+  `/etc/bash_completion.d/`. Bash 3.2 (macOS) is supported; bash 4+ can also
+  honour the directory-only and no-file directives.
+- **zsh**: save the output as `_tool` in a directory on `$fpath`, then run
+  `compinit`.
+- **fish**: save it as `~/.config/fish/completions/tool.fish`.
+- **PowerShell**: `. tool.ps1` from `$PROFILE`.
+
+Candidates come from `Command.complete(argv, cursor)`, which walks the same
+resolved command tree as the parser and returns a `CompletionResult` plus a
+`CompletionDirective`. It is pure and directly testable:
+
+```python
+result = command.complete(["git", "push", "--color", ""])
+assert "auto" in [candidate.value for candidate in result.candidates]
+```
+
+Point shell completion at paths and directories:
+
+```python
+Arg("config").long("config").value_hint("file")
+Arg("workdir").long("workdir").value_hint("dir")
+```
+
+`ValueHint` supports `any_path`, `file`, `executable` (file completion) and
+`dir` (directory-only completion). clap's `command`, `username`, `hostname`
+and `env_var` hints are not accepted: they need shell-specific knowledge this
+package does not implement, so accepting them would silently do nothing.
+
+Hidden arguments and hidden subcommands are never offered; use
+`Command("__internal").hide(True)` for those. `hide(True)` applies to
+subcommands only. The generated scripts rely on `get_matches()`;
+`get_matches_from()` also handles the `completion` command. If an application
+uses `try_get_matches_from()` directly, it should call `complete()` and
+`render_completion()` itself.
+
+Directive support varies by shell. zsh honours file, directory-only and
+no-file completion. bash 4+ honours directory-only and no-file completion;
+bash 3.2 always lets the shell fall back to files. fish can suppress file
+completion, but neither fish nor PowerShell can restrict completion to
+directories, so `dir` still offers files there. Path hints apply to a separate
+value word: `--config ` completes paths, while `--config=` suppresses path
+completion, so `--config=path` has to be typed in full. Choice values such as
+`--color=auto` are completed by the engine either way.
+
 ## Docs
 
 `cmd.render_markdown()` turns a `Command` into a Markdown page: one `#`
 section for the command, one `##` section per subcommand at any depth, named
 by its full path (`git remote add`). Content and visibility mirror
-`render_help` exactly — hidden args and hidden aliases stay out, an inherited
-global argument is documented again on every subcommand, the same as
-`--help` shows it there — so the two can never quietly drift apart.
+`render_help` exactly — hidden args, hidden aliases and hidden subcommands
+stay out, an inherited global argument is documented again on every
+subcommand, the same as `--help` shows it there — so the two can never
+quietly drift apart.
 
 ```python
 from pathlib import Path
@@ -203,10 +313,11 @@ match result.kind:
 
 Also supported: `env`, `default_value(s)`, `default_missing_value`,
 `conflicts_with(_all)`, `requires`, `ArgGroup` (`required`, `multiple`),
-`allow_hyphen_values`, `value_delimiter`, `last`, `hide`, `arg_required_else_help`,
-`disable_help_flag` / `disable_version_flag`, typo suggestions for arguments,
-subcommands and values, and a tip when an option is used at the wrong level
-(`git push -V`: "'-V' is an option of 'git'; put it before 'push'").
+`allow_hyphen_values`, `value_delimiter`, `last`, `hide`, `value_hint`,
+`arg_required_else_help`, `disable_help_flag` / `disable_version_flag`, typo
+suggestions for arguments, subcommands and values, and a tip when an option is
+used at the wrong level (`git push -V`: "'-V' is an option of 'git'; put it
+before 'push'").
 
 `-h/--help` and `-V/--version` are added for you. `help` and `version` are
 reserved ids: an argument with one of them must use the matching `help` /

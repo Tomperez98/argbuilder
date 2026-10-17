@@ -1,0 +1,34 @@
+#compdef tool
+_argbuilder_tool() {
+    local -a lines values descriptions
+    local line entry directive=0
+    lines=("${(@f)$(command tool __complete $((CURRENT - 1)) "${words[@]}" 2>/dev/null)}")
+    for line in "${lines[@]}"; do
+        [[ -z "$line" ]] && continue
+        if [[ "$line" == D$'\t'* ]]; then
+            directive="${line#D$'\t'}"
+        elif [[ "$line" == C$'\t'* ]]; then
+            entry="${line#C$'\t'}"
+            values+=("${entry%%$'\t'*}")
+            if [[ "$entry" == *$'\t'* ]]; then
+                descriptions+=("${entry#*$'\t'}")
+            else
+                descriptions+=("")
+            fi
+        fi
+    done
+    if (( directive & 2 )); then
+        _files -/
+        return
+    fi
+    if (( ${#values[@]} == 0 )); then
+        if (( ! (directive & 1) )); then _files; fi
+        return
+    fi
+    compadd -Q -d descriptions -a values
+}
+if [ "$funcstack[1]" = "_argbuilder_tool" ]; then
+    _argbuilder_tool "$@"
+else
+    compdef _argbuilder_tool tool
+fi
