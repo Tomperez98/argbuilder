@@ -1,14 +1,14 @@
 [project]
 name = "argbuilder"
 version = "2.0.0"
-description = "Typed command-line parsing where definition bugs fail at once and user mistakes return values. No dependencies."
+description = "Zero-dependency Python CLI builders with a checkable correctness contract: definition bugs raise, user mistakes return values, parsing is pure."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
     { name = "Tomas Perez Alvarez", email = "tomasperezalvarez@gmail.com" }
 ]
-keywords = ["cli", "command-line", "argument-parser", "argparse", "clap", "typed", "zero-dependency"]
+keywords = ["cli", "command-line", "argument-parser", "argparse", "clap", "typed", "zero-dependency", "testing", "agentic-coding", "coding-agents"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

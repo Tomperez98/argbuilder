@@ -1,0 +1,63 @@
+# argbuilder
+
+> Zero-dependency Python CLI builders with a checkable correctness contract:
+> definition bugs raise, user mistakes return values, and parsing is a pure
+> function. The clap model, for Python 3.12+.
+
+## Start here
+
+- [README](https://github.com/Tomperez98/argbuilder/blob/main/README.md): full behavior, examples, shell completion and clap mapping.
+- [AGENTS.md](https://github.com/Tomperez98/argbuilder/blob/main/AGENTS.md): contract, getters, test pattern and invariants for coding agents.
+- [examples/git.py](https://github.com/Tomperez98/argbuilder/blob/main/examples/git.py): a fuller CLI with subcommands.
+- [CHANGELOG](https://github.com/Tomperez98/argbuilder/blob/main/CHANGELOG.md): released changes.
+- [PyPI](https://pypi.org/project/argbuilder/): install.
+
+## Core API
+
+```python
+from argbuilder import Arg, Command
+
+
+def cli() -> Command:
+    return (
+        Command("greet")
+        .arg(Arg("name").required(True))
+        .arg(Arg("times").long("times").env("GREET_TIMES").value_parser(range(1, 6)).default_value("1"))
+    )
+```
+
+- Builders are immutable: every method returns a new `Command` / `Arg`.
+- `cli().debug_assert()` validates the whole definition; put it in a test.
+- `cli().try_get_matches_from(argv, env={...})` returns `ArgMatches | Error`; pure.
+- `cli().get_matches()` reads `sys.argv` / `os.environ`, prints errors and exits.
+- `matches.get_required(id, T)` / `get_one(id, T)` / `get_many(id, T)` /
+  `get_flag(id)` / `get_count(id)`.
+
+## Parse test
+
+```python
+from argbuilder import ArgMatches
+
+matches = cli().try_get_matches_from(["greet", "Ada"], env={"GREET_TIMES": "3"})
+assert isinstance(matches, ArgMatches)
+assert matches.get_required("times", int) == 3
+```
+
+## Errors
+
+`ErrorKind` is a union of frozen dataclasses; match it instead of parsing
+messages.
+
+```python
+match error.kind:
+    case InvalidValue(argument=a, value=v): ...
+    case UnknownArgument(argument=typed, suggestion=closest): ...
+```
+
+## Invariants
+
+- Python 3.12+, no runtime dependencies.
+- Definition mistakes raise `AssertionError`; user mistakes return `Error`.
+- Keep the parser pure; process and terminal edges belong in `get_matches` /
+  `Error.exit()`.
+- Help, Markdown docs and completion all render from the same command tree.

@@ -1,68 +1,109 @@
-# argbuilder ([clap](https://docs.rs/clap/latest/clap/) for python)
+# argbuilder
+
+**CLI bugs should fail in your test, not in your user's terminal.**
 
 [![CI](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml/badge.svg)](https://github.com/Tomperez98/argbuilder/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/argbuilder)](https://pypi.org/project/argbuilder/)
 
-Build command-line interfaces in Python from typed, immutable builders — the
-[clap] model.
+argbuilder is a zero-dependency Python CLI builder with a checkable
+correctness contract. A broken *definition* raises `AssertionError` at the
+builder call — or at build, for rules that span arguments. A broken *command
+line* comes back as a structured `Error` from `try_get_matches_from`, so a
+test can assert on it; `get_matches()` prints it and exits.
 
-A broken *definition* fails when the command is built, in CI, not in front of a
-user. A broken *command line* comes back as an `Error` you can inspect, with the
-message, typo suggestion and help ready to print.
+Parsing itself is pure: `try_get_matches_from(argv, env=...)` never reads
+`sys.argv`, `os.environ` or the terminal, so the CLI contract can be verified
+in one fast test — no subprocess, no terminal, no mocked environment.
+
+The [clap] model, for Python: immutable builders, typed getters, and one
+source of truth for help, Markdown docs and shell completion.
 
 > **Python 3.12+** · no dependencies ·
 > [github.com/Tomperez98/argbuilder](https://github.com/Tomperez98/argbuilder)
 
 ```python
-from argbuilder import Arg, Command, ValueValidation
+from argbuilder import Arg, Command
 
 
 def cli() -> Command:
     return (
-        Command("git")
-        .about("A fictional versioning CLI")
-        .version("1.0.0")
-        .subcommand_required(True)
-        .arg(Arg("verbose").short("v").long("verbose").action("count"))
-        .subcommand(
-            Command("push")
-            .about("Pushes things")
-            .arg(Arg("remote").required(True))
-            .arg(
-                Arg("port")
-                .short("p")
-                .long("port")
-                .value_parser(range(1, 65536))
-                .env("GIT_PORT")
-                .default_value("22")
-            )
-            .arg(Arg("force").short("f").long("force").action("set_true"))
+        Command("greet")
+        .arg(Arg("name").required(True))
+        .arg(
+            Arg("times")
+            .long("times")
+            .env("GREET_TIMES")
+            .value_parser(range(1, 6))
+            .default_value("1")
         )
     )
 
 
 if __name__ == "__main__":
     matches = cli().get_matches()  # reads sys.argv + os.environ, exits on error
-    match matches.subcommand():
-        case ("push", sub):
-            remote = sub.get_required("remote", str)  # str: required(True), never None
-            port = sub.get_required("port", int)  # int: it has a default
-            force = sub.get_flag("force")  # bool
-            if remote.startswith("-"):
-                sub.error(ValueValidation(), "remote must not start with '-'").exit()
+    name = matches.get_required("name", str)  # required(True): never None
+    times = matches.get_required("times", int)  # defaulted: never None
+    for _ in range(times):
+        print(f"hello, {name}")
 ```
 
 ```text
-$ git push origin -p 99999
-error: invalid value '99999' for '--port <PORT>': 99999 is not in 1..=65535
+$ greet Ada --times 6
+error: invalid value '6' for '--times <TIMES>': 6 is not in 1..=5
 
-Usage: git push [OPTIONS] <REMOTE>
+Usage: greet [OPTIONS] <NAME>
 
 For more information, try '--help'.
 ```
 
-A fuller CLI is in [`examples/git.py`](examples/git.py)
+Verify the same CLI without a process:
+
+```python
+from argbuilder import ArgMatches
+
+
+def test_cli() -> None:
+    cli().debug_assert()  # the definition is legal
+    matches = cli().try_get_matches_from(["greet", "Ada"], env={"GREET_TIMES": "3"})
+    assert isinstance(matches, ArgMatches)
+    assert matches.get_required("times", int) == 3
+```
+
+A fuller CLI with subcommands is in [`examples/git.py`](examples/git.py)
 (`uv run examples/git.py --help`).
+
+## Built for the edit → verify loop
+
+This is the property that matters when a coding agent is writing the CLI:
+the agent does not have to remember to test every failure mode, because most
+of the mechanical ones cannot pass silently.
+
+- **Definition bugs fail at the definition.** Duplicate shorts, a default the
+  parser rejects, `required(True)` plus a default, `short("ab")` — an
+  `AssertionError` names the command and argument. Cross-argument rules fail
+  at build or `debug_assert()`. Raised explicitly, so `python -O` does not
+  strip it.
+- **Reads are typed at the call site.** `get_required("port", int)` returns
+  an `int` or raises there. `get_one` is `T | None`; `get_many` is a tuple;
+  `get_flag` is a `bool`. No dictionary lookups, no stringly-typed parsed
+  values, and the optional case is explicit.
+- **The parser is pure.** `try_get_matches_from(argv, env={...})` never
+  touches `sys.argv`, `os.environ`, or the terminal. Tests are deterministic,
+  fast, and parallel.
+- **Errors are data.** `ErrorKind` is a union of frozen dataclasses. Match
+  `InvalidValue(...)` or `UnknownArgument(suggestion="--port")`; do not regex
+  a message.
+- **One definition, every output.** Help, Markdown docs and shell completion
+  render from the same tree; the pure renderers make drift a test failure.
+
+**What the contract catches:** invalid CLI structure, wrong getter/type/
+action, unknown ids, invalid values, missing required arguments, conflicts,
+and contradictory requirements.
+
+**What it does not:** what your `main` does with the parsed values. argbuilder
+checks the CLI boundary, not your business logic.
+
+Working with a coding agent? Put [`AGENTS.md`](AGENTS.md) in context.
 
 ## Install
 
@@ -118,6 +159,15 @@ result = cli().try_get_matches_from(["git", "push", "origin"], env={"GIT_PORT": 
 assert isinstance(result, ArgMatches)
 sub = result.subcommand_matches("push")
 assert sub is not None and sub.get_required("port", int) == 8080
+```
+
+Post-parse validation uses the same error format through
+`ArgMatches.error()` (or `Command.error()`):
+
+```python
+from argbuilder import ValueValidation
+
+matches.error(ValueValidation(), "--from must precede --to").exit()
 ```
 
 Only `get_matches()` reads `sys.argv` and `os.environ` for parsing. Printing
@@ -256,7 +306,7 @@ completion, so `--config=path` has to be typed in full. Choice values such as
 the value. Offering the trailing `=` itself needs per-shell no-space support
 and is still a follow-up.
 
-## Docs
+## Markdown docs
 
 `cmd.render_markdown()` turns a `Command` into a Markdown page: one `#`
 section for the command, one `##` section per subcommand at any depth, named
@@ -275,6 +325,9 @@ Path("docs/cli.md").write_text(cli().render_markdown())
 There's no separate build step or CLI: run that wherever you'd otherwise
 regenerate docs (a script, a `pytest` golden test, a CI job) and commit the
 result.
+
+For agent-facing context, see [`AGENTS.md`](AGENTS.md); for a compact index
+that LLM tools can fetch first, see [`llms.txt`](llms.txt).
 
 ## clap → argbuilder
 
