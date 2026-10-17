@@ -3,9 +3,8 @@
 Runtime tests can pass while a signature drifts (a return type widens, a
 generic collapses to `Any`), because nothing asserts the static type. This file
 uses `typing.assert_type` — a no-op at runtime, a hard error under `ty check` in
-CI — so the builder returns, the typed getters, and the derive entry points
-cannot silently change shape. TEST.md, "Pin the important unions at compile
-time".
+CI — so the builder returns and the typed getters cannot silently change shape.
+TEST.md, "Pin the important unions at compile time".
 """
 
 from __future__ import annotations
@@ -16,20 +15,9 @@ from argbuilder import (
     Arg,
     ArgMatches,
     Command,
-    Error,
     ValueParser,
     ValueSource,
-    parser,
-    to_command,
-    try_parse_from,
 )
-
-
-@parser
-class _Cli:
-    name: str = "x"
-    tag: tuple[str, ...] = ()
-
 
 _CMD = (
     Command("p")
@@ -77,8 +65,3 @@ def test_value_parser_signatures_are_pinned() -> None:
     assert_type(ValueParser.boolean(), ValueParser[bool])
     assert_type(ValueParser.choices("a", "b"), ValueParser[str])
     assert_type(ValueParser.from_fn(int), ValueParser[int])
-
-
-def test_derived_entry_points_are_pinned() -> None:
-    assert_type(try_parse_from(_Cli, ["p", "x"]), _Cli | Error)
-    assert_type(to_command(_Cli), Command)

@@ -19,7 +19,6 @@ from argbuilder import (
     UnknownArgument,
     ValueParser,
     ValueValidation,
-    arg,
 )
 from argbuilder._invariant import variant_classes
 from argbuilder._value_parser import into_value_parser
@@ -59,7 +58,6 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: Arg("x").env(1), "takes a variable name"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").conflicts_with_all(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
     (lambda: ArgGroup("g").args(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
-    (lambda: arg(requires=42), "takes a str or a list of str"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("my tool"), "without spaces"),
     (lambda: Command("x").arg("verbose"), "takes an Arg"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("x").args(Arg("a")), "use .arg"),  # ty: ignore[invalid-argument-type]

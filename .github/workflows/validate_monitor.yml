@@ -1,0 +1,47 @@
+name: Release validation monitor
+
+# Scheduled release validation runs on main with nobody watching. Its failure
+# must reach a person as one tracking issue, not a one-off email
+# (MONITOR.md rule 4). This workflow holds the issues token and runs no code
+# from the run it reports on; it only reads the run's conclusion.
+#
+# Reusable-workflow calls from Release are not tracked here: that release is
+# already being watched, and its build/publish jobs fail loudly.
+
+on:
+  workflow_run:
+    workflows: ["Release (validate)"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  track:
+    if: github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update, or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ github.event.workflow_run.conclusion != 'success' }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          title="Scheduled release validation is failing"
+          issue="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+          if [ "$FAILED" = true ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "Still failing: $RUN_URL"
+            else
+              gh issue create --title "$title" --body "$(printf '%s\n' \
+                "The scheduled release validation failed: $RUN_URL" "" \
+                "Users may be getting different bytes from PyPI, or the released package no" \
+                "longer installs. Fix the tooling on main, or close this with the reason.")"
+            fi
+          elif [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Green again: $RUN_URL"
+          fi

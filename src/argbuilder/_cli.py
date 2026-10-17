@@ -1,7 +1,7 @@
 """The process edge: the one place an `Error` becomes text on a stream and an exit code.
 
 Everything above this module is pure or data-only. `Error.exit()`,
-`Command.get_matches_from`, `parse_from` and the examples all funnel through
+`Command.get_matches_from` and the examples all funnel through
 `exit_with`, so the stream choice, the styling and the exit status are written
 here once, and the domain error value never touches `sys` or a terminal.
 """

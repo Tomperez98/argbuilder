@@ -84,6 +84,9 @@ Know these so you know what *not* to re-check by hand:
   `main`; a tag off-mainline is refused before anything is built.
 - `dist/` holds exactly this version's wheel and sdist; the wheel is
   installed into a clean venv and the examples run (`mise run smoke`).
+- `release-manifest.json` records the version, the tag commit, and a sha256
+  and size for every shipped file, including the contract spec, driver and
+  plan. It is attached to the GitHub release next to the artifacts.
 - `preflight` refuses a version PyPI already has with *different* bytes. If
   PyPI already has *some* of these exact bytes, the release resumes and
   uploads the rest — no version is burned.

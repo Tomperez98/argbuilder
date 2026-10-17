@@ -885,3 +885,12 @@ def test_requires_a_required_argument_that_is_already_missing() -> None:
     error = err(cmd, "--a", "x")
     assert isinstance(error.kind, MissingRequiredArgument)
     assert error.kind.arguments.count("--b <B>") == 1
+
+
+def test_args_and_subcommands_add_every_member() -> None:
+    cmd = (
+        Command("prog")
+        .args([Arg("a").long("a"), Arg("b").long("b")])
+        .subcommands([Command("one"), Command("two")])
+    )
+    assert ok(cmd, "--a", "x", "two").subcommand_name() == "two"

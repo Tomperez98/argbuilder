@@ -16,6 +16,40 @@ section here at all.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-16
+
+### Changed (breaking)
+
+- The class-derive API is removed. `@parser`, `@args`, `arg`, `parse`,
+  `parse_from`, `try_parse_from`, `to_command` and `from_arg_matches` are gone;
+  `Command` and `Arg` are the single way to define a CLI. The builder already
+  covers every feature the derive layer exposed (including `ArgGroup`, which the
+  derive layer could not express), keeps definition bugs at the line that
+  caused them, and needs no runtime annotation resolution.
+
+  Migration: replace a decorated class with a `Command` builder and read the
+  typed values from `ArgMatches` in dispatch:
+
+  ```python
+  @parser
+  class Push:
+      port: int = arg(short=True, default=22)
+
+
+  # becomes
+  Command("push").arg(Arg("port").short("p").value_parser(int).default_value("22"))
+  ```
+
+  `examples/git.py` shows the full builder-only pattern, including subcommands
+  and dispatch.
+
+### Added
+
+- Releases attach `release-manifest.json`, recording the version, the tag
+  commit, and a sha256 and size for every shipped artifact and contract file.
+  The release build also pins the uv version it uses, and the manifest is
+  attached to the GitHub release next to the wheel and sdist.
+
 ## [1.1.1] - 2026-10-16
 
 ### Fixed
@@ -114,7 +148,8 @@ section here at all.
   model), typed getters on `ArgMatches`, and user mistakes returned as an
   inspectable `Error` instead of raised.
 
-[Unreleased]: https://github.com/Tomperez98/argbuilder/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/Tomperez98/argbuilder/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/Tomperez98/argbuilder/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/Tomperez98/argbuilder/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Tomperez98/argbuilder/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/Tomperez98/argbuilder/compare/v1.0.0...v1.0.1
