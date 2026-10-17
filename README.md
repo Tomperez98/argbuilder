@@ -223,8 +223,8 @@ only name other globals, because every subcommand has to be able to check them.
 ## Development
 
 Everything CI runs — lint, format, type check, the tests at 100% branch
-coverage, and a build-and-import smoke test of the wheel — is one
-[`mise`](https://mise.jdx.dev) task:
+coverage, a build-and-import smoke test of the wheel, and the shape and
+behavior contract checks — is one [`mise`](https://mise.jdx.dev) task:
 
 ```bash
 mise run ci
@@ -237,9 +237,13 @@ uv run ruff check           # lint
 uv run ruff format --check  # format
 uv run ty check             # type check
 uv run pytest               # tests
+mise run contract:check     # this build against this spec
+mise run contract:compat    # this build against the last release
 ```
 
-CI runs the fast checks once and the tests on Python 3.12–3.14
+The contract tasks need the .NET SDK (`global.json` pins it).
+
+CI runs the fast checks once and the tests on Python 3.12–3.15
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). To release, write
 the [`CHANGELOG.md`](CHANGELOG.md) entry and bump the version in the same PR
 (`uv version --bump patch`), merge it, then run `mise run release:tag`: the

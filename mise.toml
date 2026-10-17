@@ -53,7 +53,15 @@ depends = ["lint", "format", "typecheck"]
 
 [tasks.ci]
 description = "The full suite: the same command CI runs"
-depends = ["ci:fast", "test", "smoke"]
+depends = ["ci:fast", "test", "smoke", "contract:check", "contract:compat", "release:dry-run"]
+
+[tasks."release:dry-run"]
+description = "Build every release artifact, including the manifest, without publishing"
+depends = ["build"]
+run = """
+dotnet run --project contract/Contract -- export contract-plan.json
+uv run --no-project python scripts/release.py manifest "$(uv version --short)" "$(git rev-parse HEAD)"
+"""
 
 [tasks."release:tag"]
 description = "Tag the version on origin/main and push the tag, which starts the release"

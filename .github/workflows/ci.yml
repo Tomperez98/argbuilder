@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     env:
       # Force uv to the matrix interpreter, overriding the repo's .python-version.
       UV_PYTHON: ${{ matrix.python-version }}
@@ -109,6 +109,8 @@ jobs:
         run: mise run contract:check
       - name: This build against the previous release's API and contract
         run: mise run contract:compat
+      - name: Build the release artifacts and manifest (dry run)
+        run: mise run release:dry-run
       # contract_report.yml posts this on the pull request. It runs with a
       # write token this job must never hold, so hand it data, not access.
       - name: Hand the report to contract_report.yml

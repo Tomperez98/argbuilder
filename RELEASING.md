@@ -73,7 +73,7 @@ gh api repos/Tomperez98/argbuilder/rulesets --jq '.[].name'
    the commit, version, and changelog entry, and waits for a "go".
 7. **Watch validation.** After publishing, `release_validate.yml` downloads
    the release from PyPI, checks the bytes match what was built, installs on
-   Python 3.12–3.14, runs the released examples, and judges the wheel with
+   Python 3.12–3.15, runs the released examples, and judges the wheel with
    the contract that shipped. The same check runs weekly.
 
 ## What the automation already guarantees

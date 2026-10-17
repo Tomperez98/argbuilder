@@ -49,6 +49,8 @@ section here at all.
   commit, and a sha256 and size for every shipped artifact and contract file.
   The release build also pins the uv version it uses, and the manifest is
   attached to the GitHub release next to the wheel and sdist.
+- Python 3.15 is tested in CI and release validation, and listed in the
+  package classifiers.
 
 ## [1.1.1] - 2026-10-16
 
