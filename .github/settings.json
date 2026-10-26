@@ -1,0 +1,86 @@
+{
+  "repository": {
+    "allow_auto_merge": true
+  },
+  "actions": {
+    "sha_pinning_required": true
+  },
+  "branch_rulesets": {
+    "main": {
+      "target": "branch",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["refs/heads/main"],
+          "exclude": []
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "strict_required_status_checks_policy": true,
+            "do_not_enforce_on_create": true,
+            "required_status_checks": [
+              { "context": "Lint, type, build" },
+              { "context": "Python 3.12" },
+              { "context": "Python 3.13" },
+              { "context": "Python 3.14" },
+              { "context": "Python 3.15" },
+              { "context": "Completion" },
+              { "context": "Contract" }
+            ]
+          }
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews_on_push": false,
+            "required_reviewers": [],
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_review_thread_resolution": false,
+            "require_extra_approval_for_unattributed_changes": true,
+            "allowed_merge_methods": ["squash"]
+          }
+        }
+      ],
+      "bypass_actors": []
+    }
+  },
+  "tag_rulesets": {
+    "release-tags": {
+      "target": "tag",
+      "enforcement": "active",
+      "conditions": {
+        "ref_name": {
+          "include": ["refs/tags/v*"],
+          "exclude": []
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "update"
+        }
+      ],
+      "bypass_actors": []
+    }
+  },
+  "environments": {
+    "pypi": {
+      "reviewers": ["Tomperez98"],
+      "prevent_self_review": false,
+      "deployment_tags": ["v*"]
+    }
+  }
+}

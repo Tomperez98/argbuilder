@@ -18,25 +18,34 @@ maintainer. The release workflow assumes they exist.
 1. **PyPI trusted publisher** — on PyPI, project *argbuilder* → *Publishing*
    → add a GitHub publisher with owner `Tomperez98`, repository `argbuilder`,
    workflow `release.yml`, environment `pypi`. No API token is stored.
-2. **`pypi` environment** — Settings → Environments → `pypi`:
-   - Deployment rule **selected tags**: `v*`.
-   - A **required reviewer** (or a wait timer, if you are the only
-     maintainer). This approval *is* the deliberate "go" before the upload.
-3. **Tag ruleset** for `v*` — block updates and deletions, so a published
-   tag can never move.
-4. **`main` branch ruleset** — require the CI checks and the merge queue,
-   and turn on *Require review from Code Owners* so
-   [`.github/CODEOWNERS`](.github/CODEOWNERS) makes a contract change need a
-   person.
-5. *(Recommended)* **Immutable releases** — Settings → General → Releases →
-   enable, so release tags and assets cannot be edited after publishing.
+2. **GitHub settings** — `mise run github:apply` (needs `gh` authenticated as
+   a repository admin). It applies [`.github/settings.json`](.github/settings.json):
+   - `main` ruleset: every CI job required, strict up-to-date checks, squash
+     merges, auto-merge, and a PR required. Approvals and code-owner review
+     stay off until a second maintainer exists; turn them on here when there
+     is one. A merge queue needs an organization-owned public repo; while
+     this repo is user-owned, strict up-to-date checks give the same
+     serialized-merge guarantee for this volume.
+   - `v*` tag ruleset: block updates and deletions, so a published tag can
+     never move.
+   - `pypi` environment: your reviewer approval and a deployment policy
+     limited to `v*` tags. The approval *is* the deliberate "go" before the
+     upload.
+   - Actions: require SHA-pinned action refs.
+3. *(Recommended)* **Immutable releases** — Settings → General → Releases →
+   enable, so release assets cannot be edited after publishing. GitHub has
+   no API for this setting, so it stays manual.
 
-Verify what exists (needs `gh`):
+Verify what exists (needs `gh` with admin auth):
 
 ```bash
-gh api repos/Tomperez98/argbuilder/environments --jq '.environments[].name'
+mise run github:check
 gh api repos/Tomperez98/argbuilder/rulesets --jq '.[].name'
+gh api repos/Tomperez98/argbuilder/environments/pypi --jq '.protection_rules'
 ```
+
+`github:check` is also a release precondition: run it before tagging, and
+fix drift before the tag exists.
 
 ## Every release
 
@@ -58,7 +67,8 @@ gh api repos/Tomperez98/argbuilder/rulesets --jq '.[].name'
 
    Commit the `pyproject.toml` bump together with the changelog entry.
 4. **Merge, and wait for green.** The CI run on `main` for the merged commit
-   must pass. Do not tag a red commit.
+   must pass. Do not tag a red commit. Run `mise run github:check` first; a
+   drifted ruleset or environment is a broken precondition.
 5. **Tag.** This resolves `origin/main` to a SHA, checks the tag and version
    agree, and refuses a version without a changelog section or one that
    isn't newer than PyPI:

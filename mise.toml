@@ -60,6 +60,14 @@ depends = ["lint", "format", "typecheck"]
 description = "The full suite: the same command CI runs"
 depends = ["ci:fast", "test", "test:completion", "smoke", "contract:check", "contract:compat", "release:dry-run"]
 
+[tasks."github:apply"]
+description = "Apply .github/settings.json to the live repository (needs admin gh auth)"
+run = "uv run --no-project python scripts/github_settings.py apply"
+
+[tasks."github:check"]
+description = "Fail when live GitHub settings drift from .github/settings.json"
+run = "uv run --no-project python scripts/github_settings.py check"
+
 [tasks."release:dry-run"]
 description = "Build every release artifact, including the manifest, without publishing"
 depends = ["build"]
