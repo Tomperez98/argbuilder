@@ -16,6 +16,44 @@ section here at all.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-26
+
+### Changed
+
+- Internal: definition panics now use explicit `bug`/`invariant` rather than
+  `assert`, so `python -O` cannot strip them. The build and validation helpers
+  were split; no public API or parsing behavior changed.
+- Release tooling now applies GitHub settings from `.github/settings.json`,
+  requires all CI checks before `main` moves, protects `v*` tags, and limits
+  the PyPI environment to `v*` tags.
+
+## [2.0.0] - 2026-10-16
+
+### Changed (breaking)
+
+- The class-derive API is removed. `@parser`, `@args`, `arg`, `parse`,
+  `parse_from`, `try_parse_from`, `to_command` and `from_arg_matches` are gone;
+  `Command` and `Arg` are the single way to define a CLI. The builder already
+  covers every feature the derive layer exposed (including `ArgGroup`, which the
+  derive layer could not express), keeps definition bugs at the line that
+  caused them, and needs no runtime annotation resolution.
+
+  Migration: replace a decorated class with a `Command` builder and read the
+  typed values from `ArgMatches` in dispatch:
+
+  ```python
+  @parser
+  class Push:
+      port: int = arg(short=True, default=22)
+
+
+  # becomes
+  Command("push").arg(Arg("port").short("p").value_parser(int).default_value("22"))
+  ```
+
+  `examples/git.py` shows the full builder-only pattern, including subcommands
+  and dispatch.
+
 ### Added
 
 - Shell completion for bash, zsh, fish and PowerShell.
@@ -54,36 +92,6 @@ section here at all.
   subcommands mutually exclusive and reports the new `SubcommandConflict`
   error kind. A required parent argument or group with this setting is a
   definition bug because no subcommand could then be used.
-
-## [2.0.0] - 2026-10-16
-
-### Changed (breaking)
-
-- The class-derive API is removed. `@parser`, `@args`, `arg`, `parse`,
-  `parse_from`, `try_parse_from`, `to_command` and `from_arg_matches` are gone;
-  `Command` and `Arg` are the single way to define a CLI. The builder already
-  covers every feature the derive layer exposed (including `ArgGroup`, which the
-  derive layer could not express), keeps definition bugs at the line that
-  caused them, and needs no runtime annotation resolution.
-
-  Migration: replace a decorated class with a `Command` builder and read the
-  typed values from `ArgMatches` in dispatch:
-
-  ```python
-  @parser
-  class Push:
-      port: int = arg(short=True, default=22)
-
-
-  # becomes
-  Command("push").arg(Arg("port").short("p").value_parser(int).default_value("22"))
-  ```
-
-  `examples/git.py` shows the full builder-only pattern, including subcommands
-  and dispatch.
-
-### Added
-
 - Releases attach `release-manifest.json`, recording the version, the tag
   commit, and a sha256 and size for every shipped artifact and contract file.
   The release build also pins the uv version it uses, and the manifest is
@@ -189,7 +197,8 @@ section here at all.
   model), typed getters on `ArgMatches`, and user mistakes returned as an
   inspectable `Error` instead of raised.
 
-[Unreleased]: https://github.com/Tomperez98/argbuilder/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/Tomperez98/argbuilder/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/Tomperez98/argbuilder/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/Tomperez98/argbuilder/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/Tomperez98/argbuilder/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Tomperez98/argbuilder/compare/v1.0.1...v1.1.0

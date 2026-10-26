@@ -5,20 +5,20 @@ goal, proposed API, implementation steps, tests, acceptance criteria and risks.
 
 Current baseline:
 
-- shell completion engine and scripts: implemented
-- `completion <SHELL>` subcommand: implemented
+- shell completion engine and scripts: implemented and shipped in 2.0.0
+- `completion <SHELL>` subcommand: shipped in 2.0.0
 - 100% package branch coverage
-- fish/PowerShell still need a final CI run after the `C`/`D` protocol change
-- parser correctness and validation semantics: implemented (`require_equals`,
+- fish/PowerShell confirmed in the `Completion` CI job (8 passed, 0 skipped)
+- parser correctness and validation semantics: shipped in 2.0.0 (`require_equals`,
   `allow_negative_numbers`, `trailing_var_arg`, `overrides_with` / `exclusive`,
   conditional requirements, `args_conflicts_with_subcommands`)
-- none of this is released yet
+- 2.0.1 is the internal correctness release; it adds no CLI features
 
 ## Order
 
 | Plan | Feature | Why now |
 |---|---|---|
-| [01](01-ship-completion.md) | Ship completion | The feature is done but unreleased; verify the shell matrix first |
+| [01](01-ship-completion.md) | Ship completion | Shipped in 2.0.0; kept as the release-gate record |
 | [02](02-install-completion.md) | Durable `completion --install` | Completes the completion UX; ephemeral path already exists |
 | [03](03-help-structure.md) | Headings, long help, help text sections | Biggest remaining help/clap parity gap |
 | [10](10-man-pages.md) | Man page generation | Natural sibling to Markdown/completion renderers |
