@@ -60,16 +60,16 @@ depends = ["lint", "format", "typecheck"]
 description = "The full suite: the same command CI runs"
 # Sequential on purpose: the contract and release-dry-run tasks all run
 # `dotnet` against contract/Contract/obj, and parallel builds race there.
-run = """
-set -e
-mise run ci:fast
-mise run test
-mise run test:completion
-mise run smoke
-mise run contract:check
-mise run contract:compat
-mise run release:dry-run
-"""
+# A run array executes its steps in order and stops at the first failure.
+run = [
+  { task = "ci:fast" },
+  { task = "test" },
+  { task = "test:completion" },
+  { task = "smoke" },
+  { task = "contract:check" },
+  { task = "contract:compat" },
+  { task = "release:dry-run" },
+]
 
 [tasks."github:apply"]
 description = "Apply .github/settings.json to the live repository (needs admin gh auth)"
