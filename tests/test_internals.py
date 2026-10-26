@@ -12,6 +12,7 @@ import pytest
 
 from argbuilder import Arg, Command
 from argbuilder._build import ResolvedArg, build
+from argbuilder._completion import _State
 from argbuilder._invariant import bug
 from argbuilder._parser import _Parser
 from argbuilder._suggest import suggest
@@ -41,6 +42,12 @@ def test_parse_values_panics_without_a_parser() -> None:
     broken = dataclasses.replace(arg, parser=None)
     with pytest.raises(AssertionError, match="takes values but has no parser"):
         parser._parse_values(broken, ["x"], None)  # noqa: SLF001
+
+
+def test_consume_pending_without_a_pending_argument_panics() -> None:
+    state = _State(build(Command("x")._spec))  # noqa: SLF001
+    with pytest.raises(AssertionError, match="pending argument disappeared"):
+        state._consume_pending()  # noqa: SLF001
 
 
 def test_bug_chains_the_underlying_cause() -> None:

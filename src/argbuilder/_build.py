@@ -202,18 +202,7 @@ def _build(
     """`inherited` holds the global arguments of every ancestor, root first."""
     path = (*parent_path, spec.name)
     where = f"Command {' '.join(path)!r}"
-    invariant(
-        depth < MAX_COMMAND_DEPTH,
-        f"{where}: subcommands nest deeper than {MAX_COMMAND_DEPTH} levels",
-    )
-    invariant(
-        depth > 0 or not (spec.aliases or spec.visible_aliases),
-        f"{where}: aliases only apply to subcommands",
-    )
-    invariant(
-        depth > 0 or not spec.hidden,
-        f"{where}: hide() only applies to subcommands; a top-level command is never hidden",
-    )
+    _check_build_level(spec, where, depth)
 
     args = _resolve_args(spec, where, inherited)
     by_id, by_short, by_long = _index_args(args, where)
@@ -225,17 +214,9 @@ def _build(
     groups = _resolve_groups(spec, by_id, where)
 
     globals_ = tuple(arg for arg in args if arg.global_)  # inherited ones first
-    # Precompute the subsets `_validate` needs, so a parse scans every argument
-    # only once (in the matched loop), not four times including auto/hidden ones.
-    arity_mins = tuple((arg, arg.min_values) for arg in positionals if arg.min_values > 0)
-    required_args = tuple(arg for arg in args if arg.required)
-    conflicting_args = tuple(arg for arg in args if arg.conflicts_with)
-    requiring_args = tuple(arg for arg in args if arg.requires)
-    conditional_args = tuple(
-        arg for arg in args if arg.required_unless_present or arg.required_if_eq
-    )
-    _check_conditional_requirements(conditional_args, args, where)
-    _check_subcommand_conflicts(spec, required_args, groups, where)
+    validation = _precompute_validation(args, positionals)
+    _check_conditional_requirements(validation.conditional_args, args, where)
+    _check_subcommand_conflicts(spec, validation.required_args, groups, where)
 
     subcommands, subcommand_names, help_subcommand = _resolve_subcommands(
         spec, path, depth, globals_, where
@@ -254,11 +235,11 @@ def _build(
         by_short=MappingProxyType(by_short),
         by_long=MappingProxyType(by_long),
         positionals=positionals,
-        arity_mins=arity_mins,
-        required_args=required_args,
-        conflicting_args=conflicting_args,
-        requiring_args=requiring_args,
-        conditional_args=conditional_args,
+        arity_mins=validation.arity_mins,
+        required_args=validation.required_args,
+        conflicting_args=validation.conflicting_args,
+        requiring_args=validation.requiring_args,
+        conditional_args=validation.conditional_args,
         groups=tuple(groups),
         subcommands=MappingProxyType(subcommands),
         subcommand_names=MappingProxyType(subcommand_names),
@@ -273,6 +254,49 @@ def _build(
         arg_required_else_help=spec.arg_required_else_help,
         hidden=spec.hidden,
         help_hint=None if help_arg is None else _help_hint(help_arg),
+    )
+
+
+def _check_build_level(spec: CommandSpec, where: str, depth: int) -> None:
+    """Reject nesting, aliases and hiding that only make sense on subcommands."""
+    invariant(
+        depth < MAX_COMMAND_DEPTH,
+        f"{where}: subcommands nest deeper than {MAX_COMMAND_DEPTH} levels",
+    )
+    invariant(
+        depth > 0 or not (spec.aliases or spec.visible_aliases),
+        f"{where}: aliases only apply to subcommands",
+    )
+    invariant(
+        depth > 0 or not spec.hidden,
+        f"{where}: hide() only applies to subcommands; a top-level command is never hidden",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidationSets:
+    """Argument subsets `_validate` reads, computed once per command build."""
+
+    arity_mins: tuple[tuple[ResolvedArg, int], ...]
+    required_args: tuple[ResolvedArg, ...]
+    conflicting_args: tuple[ResolvedArg, ...]
+    requiring_args: tuple[ResolvedArg, ...]
+    conditional_args: tuple[ResolvedArg, ...]
+
+
+def _precompute_validation(
+    args: Sequence[ResolvedArg],
+    positionals: tuple[ResolvedArg, ...],
+) -> _ValidationSets:
+    """Precompute the subsets `_validate` needs, so a parse scans each argument once."""
+    return _ValidationSets(
+        arity_mins=tuple((arg, arg.min_values) for arg in positionals if arg.min_values > 0),
+        required_args=tuple(arg for arg in args if arg.required),
+        conflicting_args=tuple(arg for arg in args if arg.conflicts_with),
+        requiring_args=tuple(arg for arg in args if arg.requires),
+        conditional_args=tuple(
+            arg for arg in args if arg.required_unless_present or arg.required_if_eq
+        ),
     )
 
 
@@ -616,6 +640,33 @@ def _resolve_value_arg(
     default_arity = (1, None) if positional and action == "append" else (1, 1)
     min_values, max_values = spec.num_args if spec.num_args is not None else default_arity
     parser = spec.value_parser if spec.value_parser is not None else _STRING
+    _check_value_arg(
+        spec,
+        action,
+        label,
+        positional=positional,
+        min_values=min_values,
+        max_values=max_values,
+    )
+    return _ValueShape(
+        min_values,
+        max_values,
+        parser,
+        tuple(_parse_default(parser, raw, label) for raw in spec.default_values),
+        tuple(_parse_default(parser, raw, label) for raw in spec.default_missing_values),
+    )
+
+
+def _check_value_arg(
+    spec: ArgSpec,
+    action: ArgAction,
+    label: str,
+    *,
+    positional: bool,
+    min_values: int,
+    max_values: int | None,
+) -> None:
+    """Every value-taking option that would silently do nothing is a definition bug."""
     invariant(
         not (spec.required and spec.default_values),
         f"{label} is required, so its default value could never be used",
@@ -669,13 +720,6 @@ def _resolve_value_arg(
         action == "append" or max_values is None or len(spec.default_values) <= max_values,
         f"{label}: {len(spec.default_values)} default values, "
         f"but num_args allows at most {max_values}",
-    )
-    return _ValueShape(
-        min_values,
-        max_values,
-        parser,
-        tuple(_parse_default(parser, raw, label) for raw in spec.default_values),
-        tuple(_parse_default(parser, raw, label) for raw in spec.default_missing_values),
     )
 
 

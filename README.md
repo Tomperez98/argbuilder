@@ -455,7 +455,7 @@ The pieces on their own:
 ```bash
 uv run ruff check           # lint
 uv run ruff format --check  # format
-uv run ty check             # type check
+uv run ty check --error-on-warning  # type check, warnings fatal
 uv run pytest               # tests
 mise run contract:check     # this build against this spec
 mise run contract:compat    # this build against the last release

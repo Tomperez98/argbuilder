@@ -413,9 +413,21 @@ class _Parser:
         return [flag if arg.action == "set_true" else not flag]
 
     def _validate(self, matched: Mapping[str, MatchedArg]) -> Error | None:
-        cmd = self._cmd
         explicit = {id for id, m in matched.items() if m.source != "default_value"}
+        conflict = self._check_conflicts(explicit)
+        if conflict is not None:
+            return conflict
+        missing = self._collect_missing(matched, explicit)
+        if missing:
+            return self._error(MissingRequiredArgument(tuple(missing)))
+        arity = self._check_arity()
+        if arity is not None:
+            return arity
+        return self._check_subcommand()
 
+    def _check_conflicts(self, explicit: set[str]) -> Error | None:
+        """Reject arguments that exclude each other, or a parent argument beside a subcommand."""
+        cmd = self._cmd
         for arg in cmd.conflicting_args:
             if arg.id not in explicit:
                 continue
@@ -445,14 +457,20 @@ class _Parser:
                 None,
             )
             if given is not None:
-                return self._error(
-                    SubcommandConflict(display_arg(given), self._subcommand[0]),
-                )
+                return self._error(SubcommandConflict(display_arg(given), self._subcommand[0]))
         for group in cmd.groups:
             present = [cmd.by_id[member] for member in group.members if member in explicit]
             if not group.multiple and len(present) > 1:
                 return self._conflict(present[0], present[1])
+        return None
 
+    def _collect_missing(
+        self,
+        matched: Mapping[str, MatchedArg],
+        explicit: set[str],
+    ) -> list[str]:
+        """Required arguments, groups, dependencies and conditional requirements."""
+        cmd = self._cmd
         missing: list[str] = [
             display_arg(arg) for arg in cmd.required_args if arg.id not in explicit
         ]
@@ -467,19 +485,11 @@ class _Parser:
                 shown = display_arg(cmd.by_id[needed])
                 if shown not in missing:
                     missing.append(shown)
-
-        def present(id: str) -> bool:
-            """Present for a condition: explicit, or a user-written default, not a flag's implicit one."""
-            entry = matched.get(id)
-            if entry is None:
-                return False
-            return entry.source != "default_value" or bool(cmd.by_id[id].defaults_raw)
-
         for arg in cmd.conditional_args:
-            if present(arg.id):
+            if self._present(matched, arg.id):
                 continue
             if arg.required_unless_present and any(
-                present(target) for target in arg.required_unless_present
+                self._present(matched, target) for target in arg.required_unless_present
             ):
                 continue
             if arg.required_if_eq and not any(
@@ -491,13 +501,24 @@ class _Parser:
             shown = display_arg(arg)
             if shown not in missing:
                 missing.append(shown)
-        if missing:
-            return self._error(MissingRequiredArgument(tuple(missing)))
+        return missing
 
-        for arg, min_values in cmd.arity_mins:
+    def _present(self, matched: Mapping[str, MatchedArg], id: str) -> bool:
+        """Present for a condition: explicit, or a user-written default, not a flag's implicit one."""
+        entry = matched.get(id)
+        if entry is None:
+            return False
+        return entry.source != "default_value" or bool(self._cmd.by_id[id].defaults_raw)
+
+    def _check_arity(self) -> Error | None:
+        for arg, min_values in self._cmd.arity_mins:
             count = len(self._local.get(arg.id, ()))
             if 0 < count < min_values:
                 return self._error(TooFewValues(display_arg(arg), min_values, count))
+        return None
+
+    def _check_subcommand(self) -> Error | None:
+        cmd = self._cmd
         if cmd.subcommand_required and self._subcommand is None:
             return self._error(MissingSubcommand(" ".join(cmd.path), tuple(cmd.subcommands)))
         return None
