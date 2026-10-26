@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAliasType
 
 import pytest
 
@@ -20,7 +20,7 @@ from argbuilder import (
     ValueParser,
     ValueValidation,
 )
-from argbuilder._invariant import variant_classes
+from argbuilder._invariant import _MAX_VARIANT_STEPS, variant_classes
 from argbuilder._value_parser import into_value_parser
 
 if TYPE_CHECKING:
@@ -46,10 +46,41 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: Arg("x").value_parser("abc"), "a str is ambiguous"),
     (lambda: Arg("x").value_parser(42), "expected a ValueParser"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("x").value_parser([]), "at least one"),
+    (lambda: ValueParser(42), "parse must be callable"),  # ty: ignore[invalid-argument-type]
+    (
+        lambda: ValueParser(lambda raw: raw, ["a"]),  # ty: ignore[invalid-argument-type]
+        "possible_values must be a tuple",
+    ),
+    (
+        lambda: ValueParser(lambda raw: raw, (1,)),  # ty: ignore[invalid-argument-type]
+        "possible_values must hold only str",
+    ),
+    (
+        lambda: ValueParser(lambda raw: raw, ("a", "a")),
+        "possible_values must not repeat",
+    ),
+    (
+        lambda: ValueParser.from_fn(42),  # ty: ignore[invalid-argument-type]
+        "expects a callable",
+    ),
+    (
+        lambda: ValueParser.integer(min="5"),  # ty: ignore[invalid-argument-type]
+        "min must be an int",
+    ),
+    (
+        lambda: ValueParser.integer(max=True),
+        "max must be an int",
+    ),
+    (
+        lambda: ValueParser.from_range([1, 2]),  # ty: ignore[invalid-argument-type]
+        "expects a range",
+    ),
     (lambda: ValueParser.integer(5, 1), "greater than max"),
     (lambda: ValueParser.from_range(range(5, 5)), "is empty"),
     (lambda: ArgGroup("g").args(["a", "a"]), "duplicate members"),
+    (lambda: ArgGroup("g").args({"a"}), "ordered iterable"),
     (lambda: Arg("x").default_values(5), "takes an iterable"),  # ty: ignore[invalid-argument-type]
+    (lambda: Arg("x").default_values({"a"}), "ordered iterable"),
     (lambda: Arg("x").default_values("22"), "takes an iterable"),
     (lambda: Arg("x").default_values([]), "non-empty list of str"),
     (lambda: Arg("x").default_values(["ok", 1]), "non-empty list of str"),  # ty: ignore[invalid-argument-type]
@@ -62,7 +93,9 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: Command("x").arg("verbose"), "takes an Arg"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("x").args(Arg("a")), "use .arg"),  # ty: ignore[invalid-argument-type]
     (lambda: Command("x").args(5), "takes a list of Arg"),  # ty: ignore[invalid-argument-type]
+    (lambda: Command("x").args({Arg("a")}), "ordered iterable"),
     (lambda: Command("x").subcommands(5), "takes a list of Command"),  # ty: ignore[invalid-argument-type]
+    (lambda: Command("x").subcommands({Command("s")}), "ordered iterable"),
     (lambda: Arg("v").action("Count"), "did you mean 'count'"),  # ty: ignore[invalid-argument-type]
     (lambda: Arg("v").action(3), "takes one of set, append"),  # ty: ignore[invalid-argument-type]
     (lambda: Error(InvalidValue, "x"), r"pass InvalidValue\(\.\.\.\)"),  # ty: ignore[invalid-argument-type]
@@ -70,6 +103,14 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
     (lambda: ValueParser.from_literal(int), "expected a Literal"),
     (lambda: Error(ValueValidation, "x"), r"pass ValueValidation\(\)"),  # ty: ignore[invalid-argument-type]
     (lambda: Error(ValueValidation(), 42), "message must be a str"),  # ty: ignore[invalid-argument-type]
+    (
+        lambda: Error(ValueValidation(), "x", restyle=42),  # ty: ignore[invalid-argument-type]
+        "restyle must be callable",
+    ),
+    (
+        lambda: Error(ValueValidation(), "x").render(42),  # ty: ignore[invalid-argument-type]
+        "takes a Style",
+    ),
     (lambda: Arg("x").alias("--x"), r"alias\(\) takes a name without leading"),
     (lambda: Arg("x").short_alias("xy"), r"short_alias\(\) takes one character"),
     (lambda: Arg("x").global_(1), r"global_\(\) takes a bool"),  # ty: ignore[invalid-argument-type]
@@ -99,6 +140,26 @@ BUILDER_BUGS: list[tuple[Callable[[], object], str]] = [
 def test_builder_bug(make: Callable[[], object], message: str) -> None:
     with panics(message):
         make()
+
+
+class _UnhashableParser:
+    __hash__ = None
+
+    def __call__(self, raw: str) -> str:
+        return raw
+
+
+def test_an_unhashable_value_parser_still_builds() -> None:
+    # A callable without __hash__ is a valid callable but not an lru_cache key.
+    # The build must fall back to an uncached pass instead of raising TypeError.
+    parser = ValueParser(_UnhashableParser())
+    with pytest.raises(TypeError):
+        hash(parser)
+    cmd = Command("x").arg(Arg("a").long("a").value_parser(parser))
+    cmd.debug_assert()
+    matches = cmd.try_get_matches_from(["x", "--a", "v"])
+    assert isinstance(matches, ArgMatches)
+    assert matches.get_one("a", str) == "v"
 
 
 def test_arg_get_id() -> None:
@@ -133,6 +194,15 @@ type _Alias20 = _Alias19
 def test_variant_classes_rejects_a_non_class_member() -> None:
     with panics("must be a union of classes"):
         variant_classes(_NotAClasses)
+
+
+def test_a_pathological_union_alias_chain_panics() -> None:
+    # Build a runtime chain; `type` statements cannot loop.
+    alias = TypeAliasType("alias", int)  # noqa: UP040
+    for _ in range(_MAX_VARIANT_STEPS + 1):
+        alias = TypeAliasType("alias", alias)  # noqa: UP040
+    with panics("is it recursive"):
+        variant_classes(alias)
 
 
 type _Nested = InvalidValue | UnknownArgument
@@ -180,6 +250,18 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         "default value 'z'",
     ),
     (Command("x").arg(Arg("a").long("a").default_missing_value("1")), "num_args\\(0"),
+    (
+        Command("x").arg(Arg("a").num_args(0, 1).default_missing_value("1")),
+        "default_missing_value\\(\\) needs an option",
+    ),
+    (
+        Command("x").arg(Arg("a").long("a").value_delimiter(",")),
+        "value_delimiter\\(\\) can produce several values",
+    ),
+    (
+        Command("x").arg(Arg("a").last(True).allow_negative_numbers(True)),
+        "allow_negative_numbers\\(\\) does nothing with last",
+    ),
     (
         Command("x").arg(Arg("f").long("f").action("set_true").num_args(1)),
         "num_args",
@@ -303,6 +385,69 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
         .arg(Arg("b").long("b").action("set_true")),
         "does not take a value",
     ),
+    (
+        Command("x").arg(Arg("a").long("a").num_args(2).default_values(["one"])),
+        "requires at least 2",
+    ),
+    (
+        Command("x").arg(Arg("a").num_args(2, 2).default_values(["one"])),
+        "requires at least 2",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").required(True).conflicts_with("b"))
+        .arg(Arg("b").long("b").required(True)),
+        "both required but conflict",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").requires("b").conflicts_with("b"))
+        .arg(Arg("b").long("b")),
+        "requires 'b' but also conflicts",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").action("set_true").exclusive(True).requires("b"))
+        .arg(Arg("b").long("b")),
+        "exclusive argument 'a' requires 'b'",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").requires("b"))
+        .arg(Arg("b").long("b").action("set_true").exclusive(True)),
+        "requires exclusive argument 'b'",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").requires("b").overrides_with("b"))
+        .arg(Arg("b").long("b")),
+        "requires 'b' but also overrides",
+    ),
+    (
+        Command("x").arg(Arg("a").long("a").requires("h")).arg(Arg("h").long("h").action("help")),
+        "only displays help or version",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").action("set_true").required(True))
+        .arg(Arg("b").long("b").action("set_true").required(True))
+        .group(ArgGroup("g").args(["a", "b"])),
+        "both required",
+    ),
+    (
+        Command("x")
+        .arg(Arg("a").long("a").action("set_true").exclusive(True).required(True))
+        .arg(Arg("b").long("b").required(True)),
+        "is exclusive and required",
+    ),
+    (
+        Command("x")
+        .arg(Arg("e").long("e").action("set_true").exclusive(True).required(True))
+        .arg(Arg("m").long("m"))
+        .arg(Arg("n").long("n"))
+        .group(ArgGroup("g").args(["m", "n"]).required(True)),
+        "required group 'g' needs another argument",
+    ),
     (Command("x").group(ArgGroup("g").arg("nope")), "unknown argument 'nope'"),
     (Command("x").arg(Arg("g")).group(ArgGroup("g").arg("g")), "already used"),
     (Command("x").subcommand_required(True), "no subcommands"),
@@ -398,12 +543,6 @@ DEFINITION_BUGS: list[tuple[Command, str]] = [
             Arg("a").num_args(1, None).last(True).trailing_var_arg(True),
         ),
         "different syntaxes",
-    ),
-    (
-        Command("x").arg(
-            Arg("a").num_args(1, None).allow_hyphen_values(True).trailing_var_arg(True),
-        ),
-        "does nothing with trailing_var_arg",
     ),
     (
         Command("x").arg(Arg("a").num_args(1, 1).trailing_var_arg(True)),
@@ -528,6 +667,12 @@ def test_env_misuse() -> None:
             ["x", "run"],
             env={"P": 1},  # ty: ignore[invalid-argument-type]
         )
+    # The first bad variable is reported in sorted order, not frozenset order.
+    with panics("'AAA' is 1"):
+        Command("x").arg(Arg("a").env("BBB")).arg(Arg("b").env("AAA")).try_get_matches_from(
+            ["x"],
+            env={"BBB": 2, "AAA": 1},  # ty: ignore[invalid-argument-type]
+        )
     # A key no argument reads is never followed, so a large environment costs
     # nothing per parse; see `_check_env`.
     unused = Command("x").try_get_matches_from(["x"], env={"UNUSED": 1})  # ty: ignore[invalid-argument-type]
@@ -556,6 +701,8 @@ def matches() -> ArgMatches:
 
 ACCESS_BUGS: list[tuple[Callable[[ArgMatches], object], str]] = [
     (lambda m: m.get_one("nmae", str), "unknown argument id 'nmae'"),
+    (lambda m: m.get_one([], str), "argument id must be a str"),  # ty: ignore[invalid-argument-type]
+    (lambda m: m.subcommand_matches([]), "subcommand name must be a str"),  # ty: ignore[invalid-argument-type]
     (lambda m: m.get_one("name", int), "holds str, not int"),
     (lambda m: m.get_one("name", "str"), "type_ must be a type"),  # ty: ignore[invalid-argument-type]
     (lambda m: m.get_required("name", "str"), "type_ must be a type"),  # ty: ignore[invalid-argument-type]

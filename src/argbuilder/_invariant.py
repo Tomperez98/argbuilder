@@ -24,11 +24,17 @@ def invariant(condition: bool, message: str) -> None:
         bug(message)
 
 
+_MAX_VARIANT_STEPS = 256
+"""How many alias entries to expand before deciding the graph is recursive."""
+
+
 def variant_classes(alias: TypeAliasType) -> tuple[type, ...]:
     """The classes of a union alias, following nested aliases: `A | (B | C)` -> `(A, B, C)`."""
     classes: list[type] = []
     pending: list[object] = [alias]
-    while pending:
+    for _ in range(_MAX_VARIANT_STEPS):
+        if not pending:
+            return tuple(classes)
         item = pending.pop(0)
         if isinstance(item, TypeAliasType):
             pending[:0] = get_args(item.__value__) or [item.__value__]
@@ -36,7 +42,10 @@ def variant_classes(alias: TypeAliasType) -> tuple[type, ...]:
             classes.append(item)
         else:
             bug(f"{alias.__name__} must be a union of classes, found {item!r}")
-    return tuple(classes)
+    bug(
+        f"{alias.__name__} did not finish expanding after {_MAX_VARIANT_STEPS} steps; "
+        f"is it recursive?",
+    )
 
 
 def check_variant(value: object, classes: tuple[type, ...], union_name: str, what: str) -> None:

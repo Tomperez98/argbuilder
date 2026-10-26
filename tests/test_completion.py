@@ -255,6 +255,74 @@ def test_option_with_no_subcommands_and_no_positionals_still_disables_files() ->
     assert answer.directive == CompletionDirective(no_file=True)
 
 
+def test_an_inline_value_does_not_swallow_the_next_word() -> None:
+    cmd = Command("p").arg(Arg("files").long("files").num_args(1, None)).subcommand(Command("sub"))
+    assert "sub" in values(cmd.complete(["p", "--files=a", "sub"], cursor=2))
+    assert "sub" in values(cmd.complete(["p", "--files=", "sub"], cursor=2))
+
+    short = Command("p").arg(Arg("files").short("f").num_args(1, None)).subcommand(Command("sub"))
+    assert "sub" in values(short.complete(["p", "-fa", "sub"], cursor=2))
+    assert "sub" in values(short.complete(["p", "-f=", "sub"], cursor=2))
+
+
+def test_double_dash_stops_a_pending_hyphen_value() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("values").long("values").num_args(0, None).allow_hyphen_values(True))
+        .arg(Arg("first").value_parser(["x"]))
+        .arg(Arg("second").value_parser(["y"]))
+    )
+    assert values(cmd.complete(["p", "--values", "--", "x", ""], cursor=4)) == ("y",)
+
+
+def test_an_unknown_hyphen_word_starts_an_allow_hyphen_positional() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("first").allow_hyphen_values(True))
+        .arg(Arg("second").value_parser(["a", "b"]))
+    )
+    assert {"a", "b"} <= set(values(cmd.complete(["p", "-x", ""], cursor=2)))
+    assert {"a", "b"} <= set(values(cmd.complete(["p", "--foo", ""], cursor=2)))
+
+
+def test_a_known_option_does_not_start_an_allow_hyphen_positional() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("verbose").short("v").long("verbose").action("set_true"))
+        .arg(Arg("first").allow_hyphen_values(True))
+        .arg(Arg("second").value_parser(["a", "b"]))
+    )
+    assert "a" not in values(cmd.complete(["p", "-v", ""], cursor=2))
+    assert "a" not in values(cmd.complete(["p", "--verbose", ""], cursor=2))
+
+
+def test_an_unknown_hyphen_word_is_a_positional_value_while_completing() -> None:
+    cmd = Command("p").arg(Arg("path").allow_hyphen_values(True).value_hint("file"))
+    assert cmd.complete(["p", "-x"], cursor=1).directive.filter_files
+    assert cmd.complete(["p", "--foo"], cursor=1).directive.filter_files
+
+    known = (
+        Command("p")
+        .arg(Arg("verbose").short("v").long("verbose").action("set_true"))
+        .arg(Arg("path").allow_hyphen_values(True).value_hint("file"))
+    )
+    assert "-v" in values(known.complete(["p", "-v"], cursor=1))
+    assert "--verbose" in values(known.complete(["p", "--verbose"], cursor=1))
+
+
+def test_trailing_var_arg_with_allow_hyphen_consumes_a_hyphen_word() -> None:
+    cmd = (
+        Command("p")
+        .arg(
+            Arg("args").trailing_var_arg(True).num_args(0, None).allow_hyphen_values(True),
+        )
+        .subcommand(Command("sub"))
+    )
+    answer = cmd.complete(["p", "-x", ""], cursor=2)
+    assert "sub" not in values(answer)
+    assert answer.directive == CompletionDirective()
+
+
 def test_words_after_the_cursor_are_ignored() -> None:
     cmd = Command("p").arg(Arg("mode").long("mode").value_parser(["a", "b"]))
     assert values(cmd.complete(["p", "--mode", "", "ignored"], cursor=2)) == ("a", "b")

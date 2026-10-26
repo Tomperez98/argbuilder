@@ -17,7 +17,7 @@ from argbuilder._spec import SHELLS, ArgAction, ArgSpec, CommandSpec, takes_valu
 from argbuilder._value_parser import Invalid, ValueParser
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from argbuilder._spec import ValueHint
 
@@ -81,6 +81,8 @@ class ResolvedArg:
     defaults_raw: tuple[str, ...]
     """The user-written defaults, for help output."""
     default_missing: tuple[Any, ...]
+    default_missing_raw: tuple[str, ...]
+    """The user-written missing-value defaults, for raw-value conditions."""
     env: str | None
     conflicts_with: frozenset[str]
     requires: frozenset[str]
@@ -174,7 +176,6 @@ class ResolvedCommand:
     """How errors point at help, e.g. `'--help'`; None when help is disabled."""
 
 
-@functools.lru_cache(maxsize=256)
 def build(spec: CommandSpec) -> ResolvedCommand:
     """Resolve the whole tree, panicking on the first definition bug.
 
@@ -182,15 +183,20 @@ def build(spec: CommandSpec) -> ResolvedCommand:
     command reuses one resolved tree instead of rebuilding it on every parse
     or render. The bound keeps a program that builds many throwaway commands
     from retaining them all. Failures are not cached.
+
+    A custom `ValueParser` may hold an unhashable callable. That is a valid
+    definition, just not an `lru_cache` key, so it is built without caching.
     """
+    try:
+        hash(spec)
+    except TypeError:
+        return _build(spec, (), 0, ())
+    return _build_cached(spec)
+
+
+@functools.lru_cache(maxsize=256)
+def _build_cached(spec: CommandSpec) -> ResolvedCommand:
     return _build(spec, (), 0, ())
-
-
-def descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
-    """Every subcommand below `cmd`, depth first. Depth is bounded by the build."""
-    for sub in cmd.subcommands.values():
-        yield sub
-        yield from descendants(sub)
 
 
 def _build(
@@ -212,11 +218,12 @@ def _build(
     _check_positionals(positionals, where)
     _check_cross_references(args, by_id, where)
     groups = _resolve_groups(spec, by_id, where)
+    _check_group_conflicts(groups, by_id, args, where)
 
-    globals_ = tuple(arg for arg in args if arg.global_)  # inherited ones first
+    globals_ = tuple(arg for arg in args if arg.global_)  # own globals first, then inherited
     validation = _precompute_validation(args, positionals)
     _check_conditional_requirements(validation.conditional_args, args, where)
-    _check_subcommand_conflicts(spec, validation.required_args, groups, where)
+    _check_subcommand_conflicts(spec, validation.required_args, groups, by_id, where)
 
     subcommands, subcommand_names, help_subcommand = _resolve_subcommands(
         spec, path, depth, globals_, where
@@ -405,12 +412,87 @@ def _check_cross_references(
                 other not in arg.conflicts_with and arg.id not in target.conflicts_with,
                 f"{where}: argument {arg.id!r} both overrides and conflicts with {other!r}",
             )
+        for other in sorted(arg.conflicts_with):
+            invariant(
+                not (arg.required and by_id[other].required),
+                f"{where}: arguments {arg.id!r} and {other!r} are both required but conflict; "
+                f"drop required() from one of them or remove the conflict",
+            )
+        if arg.exclusive:
+            for other in sorted(arg.requires):
+                target = by_id[other]
+                invariant(
+                    bool(target.defaults_raw),
+                    f"{where}: exclusive argument {arg.id!r} requires {other!r}, which has "
+                    f"no default; an explicit dependency would conflict and an absent one "
+                    f"is missing",
+                )
+        for other in sorted(arg.requires):
+            target = by_id[other]
+            invariant(
+                not (other in arg.conflicts_with or arg.id in target.conflicts_with)
+                or bool(target.defaults_raw),
+                f"{where}: argument {arg.id!r} requires {other!r} but also conflicts with it, "
+                f"and {other!r} has no default",
+            )
+            invariant(
+                other not in arg.overrides_with,
+                f"{where}: argument {arg.id!r} requires {other!r} but also overrides it",
+            )
+            invariant(
+                target.action not in ("help", "version"),
+                f"{where}: argument {arg.id!r} requires {other!r}, which only displays "
+                f"help or version and never produces matches",
+            )
+            invariant(
+                not target.exclusive or bool(target.defaults_raw),
+                f"{where}: argument {arg.id!r} requires exclusive argument {other!r}, "
+                f"which has no default; they could never be used together",
+            )
+        if arg.exclusive and arg.required:
+            for other in args:
+                if other is arg or not other.required:
+                    continue
+                bug(
+                    f"{where}: argument {arg.id!r} is exclusive and required, but "
+                    f"{other.id!r} is required too",
+                )
+
+
+def _check_group_conflicts(
+    groups: Sequence[ResolvedGroup],
+    by_id: Mapping[str, ResolvedArg],
+    args: Sequence[ResolvedArg],
+    where: str,
+) -> None:
+    """Reject groups whose own rules can never be satisfied."""
+    for group in groups:
+        if not group.multiple:
+            required = [member for member in group.members if by_id[member].required]
+            if len(required) > 1:
+                bug(
+                    f"{where}: group {group.id!r} allows one member, but "
+                    f"{required[0]!r} and {required[1]!r} are both required",
+                )
+        if not group.required:
+            continue
+        for arg in args:
+            if not (arg.exclusive and arg.required) or arg.id in group.members:
+                continue
+            if any(by_id[member].defaults_raw for member in group.members):
+                continue
+            bug(
+                f"{where}: argument {arg.id!r} is exclusive and required, but required "
+                f"group {group.id!r} needs another argument; add a member default or "
+                f"make {arg.id!r} part of the group",
+            )
 
 
 def _check_subcommand_conflicts(
     spec: CommandSpec,
     required_args: Sequence[ResolvedArg],
     groups: Sequence[ResolvedGroup],
+    by_id: Mapping[str, ResolvedArg],
     where: str,
 ) -> None:
     """`args_conflicts_with_subcommands` must not make subcommands unusable."""
@@ -421,7 +503,11 @@ def _check_subcommand_conflicts(
             f"{where}: args_conflicts_with_subcommands(True) but argument "
             f"{required_args[0].id!r} is required; a subcommand could never be used",
         )
-    required_groups = [group.id for group in groups if group.required]
+    required_groups = [
+        group.id
+        for group in groups
+        if group.required and not any(by_id[member].defaults_raw for member in group.members)
+    ]
     if required_groups:
         bug(
             f"{where}: args_conflicts_with_subcommands(True) but group "
@@ -532,7 +618,7 @@ def _resolve_subcommands(
             f"{where}: subcommand name 'completion' is already used; "
             f"completion_subcommand(True) adds one automatically",
         )
-        subcommands["completion"] = _build(_COMPLETION_SUBCOMMAND, path, depth + 1, ())
+        subcommands["completion"] = _build(_COMPLETION_SUBCOMMAND, path, depth + 1, globals_)
         subcommand_names["completion"] = "completion"
     invariant(
         not spec.subcommand_required or len(subcommands) > 0,
@@ -582,6 +668,7 @@ def _resolve_arg(spec: ArgSpec, where: str) -> ResolvedArg:
         defaults=shape.defaults,
         defaults_raw=spec.default_values,
         default_missing=shape.default_missing,
+        default_missing_raw=spec.default_missing_values,
         env=spec.env,
         conflicts_with=spec.conflicts_with,
         requires=spec.requires,
@@ -676,8 +763,18 @@ def _check_value_arg(
         f"{label}: default_missing_value() needs num_args(0, ...) so the value can be omitted",
     )
     invariant(
+        not (positional and spec.default_missing_values),
+        f"{label}: default_missing_value() needs an option; a positional is either given "
+        f"a value or not",
+    )
+    invariant(
         not (positional and spec.value_delimiter is not None),
         f"{label}: value_delimiter() is only supported on options",
+    )
+    invariant(
+        spec.value_delimiter is None or max_values is None or max_values > 1,
+        f"{label}: value_delimiter() can produce several values; use "
+        f"num_args(..., None) or a max greater than 1",
     )
     invariant(
         not (positional and spec.require_equals),
@@ -700,6 +797,11 @@ def _check_value_arg(
         f"every value after '--' is already taken verbatim",
     )
     invariant(
+        not (spec.last and spec.allow_negative_numbers),
+        f"{label}: allow_negative_numbers() does nothing with last(); "
+        f"every value after '--' is already taken verbatim",
+    )
+    invariant(
         not spec.trailing_var_arg or positional,
         f"{label}: trailing_var_arg() needs a positional; give it neither short() nor long()",
     )
@@ -708,13 +810,13 @@ def _check_value_arg(
         f"{label}: trailing_var_arg() and last() are different syntaxes; pick one",
     )
     invariant(
-        not (spec.trailing_var_arg and spec.allow_hyphen_values),
-        f"{label}: allow_hyphen_values() does nothing with trailing_var_arg(); "
-        f"every token after it starts is already a value",
-    )
-    invariant(
         not spec.trailing_var_arg or max_values is None,
         f"{label}: trailing_var_arg() needs an unbounded num_args(..., None)",
+    )
+    invariant(
+        not spec.default_values or len(spec.default_values) >= min_values,
+        f"{label}: {len(spec.default_values)} default values, "
+        f"but num_args requires at least {min_values}",
     )
     invariant(
         action == "append" or max_values is None or len(spec.default_values) <= max_values,

@@ -54,8 +54,10 @@ def render_usage(cmd: ResolvedCommand) -> str:
         parts.append("[OPTIONS]")
     parts.extend(display_arg(arg) for arg in options if arg.required)
     parts.extend(positional_label(arg) for arg in cmd.positionals if not arg.hide)
-    if any(not sub.hidden for sub in cmd.subcommands.values()):
-        parts.append("<COMMAND>" if cmd.subcommand_required else "[COMMAND]")
+    if cmd.subcommand_required:
+        parts.append("<COMMAND>")
+    elif any(not sub.hidden for sub in cmd.subcommands.values()):
+        parts.append("[COMMAND]")
     return " ".join(parts)
 
 

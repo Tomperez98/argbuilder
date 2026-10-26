@@ -287,9 +287,9 @@ Arg("workdir").long("workdir").value_hint("dir")
 and `env_var` hints are not accepted: they need shell-specific knowledge this
 package does not implement, so accepting them would silently do nothing.
 
-Hidden arguments and hidden subcommands are never offered; use
-`Command("__internal").hide(True)` for those. `hide(True)` applies to
-subcommands only. The generated scripts rely on `get_matches()`;
+Hidden arguments and hidden subcommands are never offered, and never named in
+a placement tip; use `Command("__internal").hide(True)` for those. `hide(True)`
+applies to subcommands only. The generated scripts rely on `get_matches()`;
 `get_matches_from()` also handles the `completion` command. If an application
 uses `try_get_matches_from()` directly, it should call `complete()` and
 `render_completion()` itself.
@@ -378,20 +378,26 @@ and `-c=always` work, while `--color always`, `-c always` and `-calways` are
 errors. It only applies to value-taking options with `short()` or `long()`;
 a positional has no `=` spelling. With `num_args(0, 1)`, a bare `--color`
 still selects the argument and uses `default_missing_value()` or no value,
-and never consumes the next token. `value_delimiter()` may split the single
-inline value, so `--tags=a,b` can produce several values.
+and never consumes the next token. `default_missing_value()` is option-only:
+a positional is either given a value or not. `value_delimiter()` may split
+the single inline value, so `--tags=a,b` can produce several values; because
+the split pieces count toward `num_args`, a delimiter needs
+`num_args(..., None)` or a max greater than 1.
 
 `allow_negative_numbers(True)` accepts the plain negative numeric grammar
 `-5`, `-0.5`, `-1.5e-3` (no underscores, `nan`, `inf`, or bare `-`). It works
 for options and positionals; `-x` still parses as a flag. A digit short such
 as `-5` cannot coexist with it on the same command, because both would claim
-the same token.
+the same token. A `last()` positional already takes every post-`--` token
+verbatim, so `allow_negative_numbers()` there is a definition bug.
 
 `trailing_var_arg(True)` is the no-`--` wrapper mode:
 `mytool run cargo build --release` stores `("cargo", "build", "--release")`.
 It must be the final positional with `num_args(..., None)` and cannot be
-combined with `last()` or `allow_hyphen_values()`. A subcommand name still
-wins before the trailing positional starts; a later `--` is a value.
+combined with `last()`. A known option still parses before the run starts;
+`allow_hyphen_values(True)` lets an unknown `-x` or `--flag` start it, and
+`--` forces everything after it through. A subcommand name still wins before
+the trailing positional starts; a later `--` is a value.
 
 `overrides_with(id)` is last-one-wins: using the argument removes earlier
 command-line values of `id`. Defaults and environment values are not erased;
@@ -405,10 +411,20 @@ environment values do.
 from the command line or environment, or has a user-written default. A flag's
 implicit `False`/`0` does not count. `required_if_eq(id, value)` requires the
 argument when `id`'s effective raw spelling equals `value`; the comparison is
-on the raw command-line, environment or default string, not the parsed value.
+on the raw command-line, environment, default or `default_missing_value()`
+string, not the parsed value.
 Both forms combine all missing arguments into one `MissingRequiredArgument`.
 A conditional argument is a definition bug if it is also `required(True)` or
 has a default.
+
+`requires(id)` and required groups use the same notion of presence: a
+command-line or environment value, or a user-written default, satisfies them;
+a flag's implicit `False`/`0` does not. Definitions that can never be
+satisfied panic at build: two required arguments that conflict, `requires`
+paired with a conflicting or exclusive dependency (unless the dependency has
+a default), an exclusive required argument beside another required argument
+or a required group with no default, and a single-choice group with more than
+one required member.
 
 `args_conflicts_with_subcommands(True)` makes a command's own arguments
 mutually exclusive with its subcommands: `stash --message wip` and

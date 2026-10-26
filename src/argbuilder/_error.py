@@ -185,10 +185,10 @@ def describe(kind: ParseFailure) -> str:
         case SubcommandConflict(argument, command):
             return f"the argument '{argument}' cannot be used with the subcommand '{command}'"
         case MissingSubcommand(command, subcommands):
-            return (
-                f"'{command}' requires a subcommand but one was not provided\n"
-                f"  [subcommands: {', '.join(subcommands)}]"
-            )
+            message = f"'{command}' requires a subcommand but one was not provided"
+            if not subcommands:
+                return message
+            return f"{message}\n  [subcommands: {', '.join(subcommands)}]"
         case MissingRequiredArgument(arguments):  # pragma: no branch
             listed = "\n".join(f"  {shown}" for shown in arguments)
             return f"the following required arguments were not provided:\n{listed}"
@@ -228,6 +228,10 @@ class Error:
             isinstance(self.message, str),
             f"Error message must be a str, got {self.message!r}",
         )
+        invariant(
+            self.restyle is None or callable(self.restyle),
+            f"Error restyle must be callable, got {self.restyle!r}",
+        )
 
     @property
     def exit_code(self) -> int:
@@ -239,6 +243,7 @@ class Error:
 
     def render(self, style: Style = PLAIN) -> str:
         """The text `exit()` prints. Plain unless you pass a `Style`."""
+        invariant(isinstance(style, Style), f"Error.render() takes a Style, got {style!r}")
         if isinstance(
             self.kind,
             DisplayHelp | DisplayVersion | DisplayHelpOnMissingArgumentOrSubcommand,

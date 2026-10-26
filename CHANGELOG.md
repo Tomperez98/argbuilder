@@ -16,6 +16,46 @@ section here at all.
 
 ## [Unreleased]
 
+### Fixed
+
+- `completion <SHELL>` is a meta command: it now prints the script even when the
+  root command has required arguments, and it accepts global arguments like
+  every other subcommand.
+- `num_args()` is now enforced for environment and default values. A default
+  list that cannot supply the minimum is a definition bug and panics at build;
+  an environment value for a positional with too few values returns
+  `TooFewValues` instead of silently producing an under-filled match.
+- A malformed `ValueParser` now panics where it is constructed instead of
+  failing later with `TypeError`: `parse` must be callable, `possible_values`
+  must be a tuple of distinct `str`, `integer()` bounds must be ints, and
+  `from_range()` takes a `range`. A valid parser whose callable is unhashable
+  still works; the build cache falls back to an uncached build.
+- Hidden subcommands no longer leak through `MissingSubcommand` or an
+  "option of ..." placement tip. A subcommand-required command with no visible
+  subcommands now still shows `<COMMAND>` in its usage.
+- Definitions that can never be satisfied now panic at build: two required
+  arguments that conflict, `requires` paired with a conflicting, exclusive or
+  self-overridden dependency (unless the dependency has a default), an exclusive
+  required argument beside another required argument or a required group with
+  no default, and a single-choice group with more than one required member.
+- `requires` and required groups accept a user-written default, matching
+  `required_unless_present`; a flag's implicit `False`/`0` still does not count.
+- `required_if_eq` reads the raw spelling of a `default_missing_value()`.
+- `trailing_var_arg()` now accepts `allow_hyphen_values()`, so an unknown
+  `-x`/`--flag` can start the wrapper run; a known option still wins. Completion
+  follows the same rule, no longer swallows the word after an inline value, and
+  treats `--` as a separator even beside an `allow_hyphen_values` option.
+- `default_missing_value()` on a positional, `allow_negative_numbers()` on a
+  `last()` positional, and `value_delimiter()` with a maximum of one are
+  definition bugs instead of silent no-ops or guaranteed parse errors.
+- Passing a non-`str` id to a matches getter, or a non-`str` subcommand name,
+  now panics with the library's message; `Error.render()` validates its
+  `Style`, and `Error(restyle=...)` requires a callable. A recursive union type
+  alias now panics instead of looping.
+- Environment-variable errors are reported in sorted order, and builders whose
+  declaration order matters (`default_values`, `args`, `subcommands`, group
+  members) reject sets instead of accepting hash-randomized order.
+
 ## [2.0.1] - 2026-10-26
 
 ### Changed
