@@ -82,6 +82,8 @@ Generate a shell completion script
 
 **Options:**
 
+* `-v, --verbose...` — More output per occurrence
+* `--color <WHEN>` — Colorize output [default: auto] [possible values: always, auto, never]
 * `-h, --help` — Print help
 
 ## `git help`

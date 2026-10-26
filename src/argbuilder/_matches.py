@@ -144,6 +144,7 @@ class ArgMatches:
 
     def subcommand_matches(self, name: str) -> ArgMatches | None:
         """The subcommand's matches by its name (not an alias), or None if it was not used."""
+        invariant(isinstance(name, str), f"subcommand name must be a str, got {name!r}")
         canonical = self._cmd.subcommand_names.get(name, name)
         invariant(
             canonical == name,
@@ -160,6 +161,7 @@ class ArgMatches:
         return self._subcommand[1]
 
     def _arg(self, id: str) -> ResolvedArg:
+        invariant(isinstance(id, str), f"argument id must be a str, got {id!r}")
         arg = self._cmd.by_id.get(id)
         if arg is None:
             bug(f"unknown argument id {id!r}; defined ids: {', '.join(self._cmd.by_id)}")

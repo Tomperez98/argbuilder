@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
-from argbuilder._arg import Arg, ArgGroup, _check_bool
+from argbuilder._arg import Arg, ArgGroup, _check_bool, _check_ordered
 from argbuilder._build import build
 from argbuilder._completion import (
     SHELLS,
@@ -125,6 +125,7 @@ class Command:
             isinstance(args, Iterable) and not isinstance(args, str),
             f"{self!r}.args() takes a list of Arg, got {args!r}",
         )
+        _check_ordered(repr(self), "args", args)
         result = self
         for arg in args:
             result = result.arg(arg)
@@ -154,6 +155,7 @@ class Command:
             isinstance(commands, Iterable) and not isinstance(commands, str),
             f"{self!r}.subcommands() takes a list of Command, got {commands!r}",
         )
+        _check_ordered(repr(self), "subcommands", commands)
         result = self
         for command in commands:
             result = result.subcommand(command)
@@ -353,7 +355,7 @@ def _check_env(env: Mapping[str, str], names: frozenset[str]) -> None:
     """
     if not isinstance(env, Mapping):
         bug("env must be a mapping of str to str")
-    for name in names:
+    for name in sorted(names):
         value = env.get(name, "")
         if not isinstance(value, str):
             # Built only on the failing branch, so a large env costs nothing on success.

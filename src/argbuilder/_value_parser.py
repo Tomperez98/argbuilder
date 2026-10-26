@@ -27,6 +27,24 @@ class ValueParser[T]:
     parse: Callable[[str], T | Invalid]
     possible_values: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        invariant(
+            callable(self.parse),
+            f"ValueParser.parse must be callable, got {self.parse!r}",
+        )
+        invariant(
+            isinstance(self.possible_values, tuple),
+            f"ValueParser.possible_values must be a tuple of str, got {self.possible_values!r}",
+        )
+        invariant(
+            all(isinstance(value, str) for value in self.possible_values),
+            f"ValueParser.possible_values must hold only str, got {self.possible_values!r}",
+        )
+        invariant(
+            len(set(self.possible_values)) == len(self.possible_values),
+            f"ValueParser.possible_values must not repeat, got {self.possible_values!r}",
+        )
+
     @staticmethod
     def from_fn[U](fn: Callable[[str], U | Invalid]) -> ValueParser[U]:
         """Adapt a plain function such as `float`, `Path` or your own.
@@ -35,6 +53,7 @@ class ValueParser[T]:
         invalid-value error for the user. Any *other* exception is a bug in
         the function and propagates.
         """
+        invariant(callable(fn), f"ValueParser.from_fn expects a callable, got {fn!r}")
 
         def parse(raw: str) -> U | Invalid:
             try:
@@ -47,6 +66,14 @@ class ValueParser[T]:
     @staticmethod
     def integer(min: int | None = None, max: int | None = None) -> ValueParser[int]:
         """Base-10 integers, optionally bounded (inclusive): clap's `value_parser!(i64).range(..)`."""
+        invariant(
+            min is None or (isinstance(min, int) and not isinstance(min, bool)),
+            f"ValueParser.integer: min must be an int or None, got {min!r}",
+        )
+        invariant(
+            max is None or (isinstance(max, int) and not isinstance(max, bool)),
+            f"ValueParser.integer: max must be an int or None, got {max!r}",
+        )
         invariant(
             min is None or max is None or min <= max,
             f"ValueParser.integer: min {min} is greater than max {max}",
@@ -69,6 +96,10 @@ class ValueParser[T]:
     @staticmethod
     def from_range(accepted: range) -> ValueParser[int]:
         """Integers inside a Python `range`, step included."""
+        invariant(
+            isinstance(accepted, range),
+            f"ValueParser.from_range expects a range, got {accepted!r}",
+        )
         invariant(len(accepted) > 0, f"ValueParser.from_range: {accepted!r} is empty")
         if accepted.step == 1:
             return ValueParser.integer(accepted.start, accepted.stop - 1)

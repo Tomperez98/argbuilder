@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from argbuilder import (
+    Arg,
     ArgMatches,
     Command,
     DisplayHelp,
@@ -84,6 +85,73 @@ def test_each_shell_parses(shell: str) -> None:
     sub = matches.subcommand_matches("completion")
     assert sub is not None
     assert sub.get_required("shell", str) == shell
+
+
+def test_completion_command_bypasses_root_required_arguments() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("token").long("token").required(True))
+        .arg(Arg("files").num_args(2, 2).required(True))
+        .completion_subcommand(True)
+    )
+    matches = cmd.try_get_matches_from(["p", "completion", "bash"])
+    assert isinstance(matches, ArgMatches)
+    assert matches.subcommand_name() == "completion"
+    sub = matches.subcommand_matches("completion")
+    assert sub is not None
+    assert sub.get_required("shell", str) == "bash"
+
+    missing = cmd.try_get_matches_from(["p"])
+    assert isinstance(missing, Error)
+    assert isinstance(missing.kind, MissingRequiredArgument)
+
+    bad_shell = cmd.try_get_matches_from(["p", "completion", "tcsh"])
+    assert isinstance(bad_shell, Error)
+    assert isinstance(bad_shell.kind, InvalidValue)
+
+
+def test_completion_command_accepts_global_arguments() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("verbose").short("v").action("count").global_(True))
+        .arg(Arg("color").long("color").global_(True).default_value("auto"))
+        .completion_subcommand(True)
+    )
+    matches = cmd.try_get_matches_from(["p", "completion", "-v", "bash"])
+    assert isinstance(matches, ArgMatches)
+    assert matches.get_count("verbose") == 1
+    assert matches.get_one("color", str) == "auto"
+    sub = matches.subcommand_matches("completion")
+    assert sub is not None
+    assert sub.get_count("verbose") == 1
+    assert sub.get_one("color", str) == "auto"
+    assert sub.get_required("shell", str) == "bash"
+
+    before = cmd.try_get_matches_from(["p", "-v", "completion", "bash"])
+    assert isinstance(before, ArgMatches)
+    assert before.get_count("verbose") == 1
+
+
+def test_get_matches_from_prints_the_script_with_required_root_args(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cmd = Command("p").arg(Arg("token").long("token").required(True))
+    cmd = cmd.completion_subcommand(True)
+    with pytest.raises(SystemExit) as exited:
+        cmd.get_matches_from(["p", "completion", "bash"])
+    assert exited.value.code == 0
+    assert capsys.readouterr().out == cmd.render_completion("bash")
+
+
+def test_a_user_defined_completion_subcommand_is_not_a_meta_command() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("token").long("token").required(True))
+        .subcommand(Command("completion").arg(Arg("shell").required(True)))
+    )
+    error = cmd.try_get_matches_from(["p", "completion", "bash"])
+    assert isinstance(error, Error)
+    assert isinstance(error.kind, MissingRequiredArgument)
 
 
 def test_missing_shell_is_a_normal_parse_error() -> None:

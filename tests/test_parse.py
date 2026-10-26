@@ -195,6 +195,27 @@ def test_trailing_var_arg_parses_options_before_it_starts() -> None:
     assert matches.get_many("command", str) == ("cargo", "build", "--release")
 
 
+def test_trailing_var_arg_with_allow_hyphen_can_start_with_a_flag() -> None:
+    cmd = Command("p").arg(
+        Arg("args").num_args(1, None).trailing_var_arg(True).allow_hyphen_values(True),
+    )
+    assert ok(cmd, "-x", "--foo").get_many("args", str) == ("-x", "--foo")
+    assert ok(cmd, "--foo", "-j8").get_many("args", str) == ("--foo", "-j8")
+
+
+def test_a_known_option_still_wins_before_a_trailing_run() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("verbose").short("v").long("verbose").action("set_true"))
+        .arg(
+            Arg("args").num_args(1, None).trailing_var_arg(True).allow_hyphen_values(True),
+        )
+    )
+    matches = ok(cmd, "-v", "--foo")
+    assert matches.get_flag("verbose")
+    assert matches.get_many("args", str) == ("--foo",)
+
+
 def test_trailing_var_arg_starts_after_a_double_dash_separator() -> None:
     assert ok(TRAILING, "--", "cargo", "build").get_many("command", str) == (
         "cargo",
@@ -281,6 +302,18 @@ def test_parent_default_and_env_do_not_conflict_with_a_subcommand() -> None:
         .subcommand(Command("push"))
     )
     assert ok(from_env, "push", env={"MESSAGE": "wip"}).subcommand_name() == "push"
+
+
+def test_a_defaulted_required_group_does_not_block_subcommands() -> None:
+    cmd = (
+        Command("p")
+        .args_conflicts_with_subcommands(True)
+        .arg(Arg("a").long("a").default_value("x"))
+        .arg(Arg("b").long("b"))
+        .group(ArgGroup("g").args(["a", "b"]).required(True))
+        .subcommand(Command("sub"))
+    )
+    assert ok(cmd, "sub").subcommand_name() == "sub"
 
 
 def test_an_explicit_parent_global_conflicts_but_an_inherited_one_does_not() -> None:
@@ -540,6 +573,17 @@ def test_required_if_eq_uses_the_raw_spelling_not_the_parsed_value() -> None:
     )
     # Parsed as "WRITE", but the raw spelling does not equal "write".
     assert ok(cmd, "--mode", "WRITE").get_one("output", str) is None
+
+
+def test_required_if_eq_reads_a_default_missing_value() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("mode").long("mode").num_args(0, 1).default_missing_value("on"))
+        .arg(Arg("output").long("output").required_if_eq("mode", "on"))
+    )
+    assert isinstance(err(cmd, "--mode").kind, MissingRequiredArgument)
+    assert isinstance(err(cmd, "--mode=on").kind, MissingRequiredArgument)
+    assert ok(cmd, "--mode=off").get_one("output", str) is None
 
 
 def test_required_if_eq_reads_env_and_default_raw_values() -> None:
@@ -837,6 +881,22 @@ def test_exact_count() -> None:
     assert isinstance(err(cmd, "--point=1").kind, TooFewValues)
 
 
+def test_default_values_satisfy_min_num_args() -> None:
+    cmd = Command("prog").arg(Arg("pair").long("pair").num_args(2).default_values(["a", "b"]))
+    assert ok(cmd).get_many("pair", str) == ("a", "b")
+
+
+def test_env_on_a_positional_enforces_min_num_args() -> None:
+    cmd = Command("prog").arg(Arg("files").num_args(2, 2).env("FILES"))
+    error = err(cmd, env={"FILES": "one"})
+    assert error.kind == TooFewValues("<FILES>...", 2, 1, "FILES")
+
+
+def test_env_on_a_positional_within_num_args() -> None:
+    cmd = Command("prog").arg(Arg("files").num_args(1, 2).env("FILES"))
+    assert ok(cmd, env={"FILES": "one"}).get_many("files", str) == ("one",)
+
+
 def test_value_delimiter() -> None:
     cmd = Command("prog").arg(Arg("tags").long("tags").num_args(1, None).value_delimiter(","))
     assert ok(cmd, "--tags", "a,b", "c").get_many("tags", str) == ("a", "b", "c")
@@ -1079,6 +1139,42 @@ def test_requires() -> None:
     assert ok(cmd).get_one("user", str) is None
 
 
+def test_requires_accepts_a_user_written_default() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("x").long("x").action("set_true").requires("y"))
+        .arg(Arg("y").long("y").default_value("d"))
+    )
+    assert ok(cmd, "--x").get_one("y", str) == "d"
+
+
+def test_exclusive_can_require_a_defaulted_argument() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("x").long("x").action("set_true").exclusive(True).requires("y"))
+        .arg(Arg("y").long("y").default_value("d"))
+    )
+    assert ok(cmd, "--x").get_one("y", str) == "d"
+
+
+def test_requires_and_conflicts_are_allowed_when_the_target_is_defaulted() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("x").long("x").action("set_true").requires("y").conflicts_with("y"))
+        .arg(Arg("y").long("y").default_value("d"))
+    )
+    assert ok(cmd, "--x").get_one("y", str) == "d"
+
+
+def test_requires_may_target_an_exclusive_value_with_a_default() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("x").long("x").action("set_true").requires("y"))
+        .arg(Arg("y").long("y").exclusive(True).default_value("d"))
+    )
+    assert ok(cmd, "--x").get_one("y", str) == "d"
+
+
 def test_requires_lists_every_dependency_from_every_requiring_argument() -> None:
     # `--absent` comes first and is not given, so the loop must `continue` past
     # it, not `break`: a break would hide the two present arguments' missing
@@ -1108,6 +1204,47 @@ def test_groups() -> None:
     assert ok(cmd, "--minor").get_flag("minor")
     both = cmd.group(ArgGroup("any").args(["major", "minor"]).multiple(True))
     assert isinstance(err(both, "--major", "--minor").kind, ArgumentConflict)  # "bump" still
+
+
+def test_an_exclusive_required_argument_can_satisfy_its_own_required_group() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("e").long("e").action("set_true").exclusive(True).required(True))
+        .arg(Arg("x").long("x"))
+        .group(ArgGroup("g").args(["e", "x"]).required(True))
+    )
+    assert ok(cmd, "--e").get_flag("e")
+
+
+def test_an_exclusive_required_argument_may_coexist_with_a_defaulted_group() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("e").long("e").action("set_true").exclusive(True).required(True))
+        .arg(Arg("m").long("m").default_value("d"))
+        .arg(Arg("n").long("n"))
+        .group(ArgGroup("g").args(["m", "n"]).required(True))
+    )
+    assert ok(cmd, "--e").get_one("m", str) == "d"
+
+
+def test_a_required_group_accepts_a_user_written_default() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("a").long("a").default_value("x"))
+        .arg(Arg("b").long("b"))
+        .group(ArgGroup("g").args(["a", "b"]).required(True))
+    )
+    assert ok(cmd).get_one("a", str) == "x"
+
+
+def test_a_required_group_does_not_count_a_flags_implicit_default() -> None:
+    cmd = (
+        Command("p")
+        .arg(Arg("a").long("a").action("set_true"))
+        .arg(Arg("b").long("b"))
+        .group(ArgGroup("g").args(["a", "b"]).required(True))
+    )
+    assert isinstance(err(cmd).kind, MissingRequiredArgument)
 
 
 # -- subcommands ----------------------------------------------------------------
@@ -1141,6 +1278,69 @@ def test_nested_subcommand_errors_carry_the_path() -> None:
     pop = nested.subcommand_matches("pop")
     assert pop is not None
     assert pop.get_one("index", int) == 3
+
+
+def test_hidden_commands_arguments_and_aliases_do_not_leak_into_tips() -> None:
+    cmd = (
+        Command("p")
+        .subcommand(Command("visible"))
+        .subcommand(Command("internal").hide(True).arg(Arg("secret").long("secret").short("s")))
+    )
+    for typed in ("--secret", "-s"):
+        error = err(cmd, typed)
+        assert error.tip == f"to pass '{typed}' as a value, use '-- {typed}'"
+
+    hidden_arg = Command("p").subcommand(
+        Command("sub")
+        .arg(Arg("hidden").long("hidden").short("H").hide(True))
+        .arg(Arg("alias").long("alias").alias("hidden-alias").short_alias("Z"))
+    )
+    for typed in ("--hidden", "-H", "--hidden-alias", "-Z"):
+        error = err(hidden_arg, typed)
+        assert error.tip == f"to pass '{typed}' as a value, use '-- {typed}'"
+
+    hidden_subtree = Command("p").subcommand(
+        Command("internal")
+        .hide(True)
+        .subcommand(Command("child").arg(Arg("secret").long("secret")))
+    )
+    error = err(hidden_subtree, "--secret", "x")
+    assert error.tip == "to pass '--secret' as a value, use '-- --secret'"
+
+    hidden_ancestor = Command("p").subcommand(
+        Command("internal")
+        .hide(True)
+        .arg(Arg("secret").long("secret"))
+        .subcommand(Command("child"))
+    )
+    error = err(hidden_ancestor, "internal", "child", "--secret", "x")
+    assert error.tip == "to pass '--secret' as a value, use '-- --secret'"
+
+
+def test_missing_subcommand_lists_only_visible_commands() -> None:
+    cmd = (
+        Command("p")
+        .subcommand_required(True)
+        .subcommand(Command("visible"))
+        .subcommand(Command("hidden").hide(True))
+    )
+    error = err(cmd)
+    assert isinstance(error.kind, MissingSubcommand)
+    assert error.kind.subcommands == ("visible", "help")
+    assert "hidden" not in error.message
+
+
+def test_missing_subcommand_can_have_no_visible_names() -> None:
+    cmd = (
+        Command("p")
+        .subcommand_required(True)
+        .disable_help_subcommand(True)
+        .subcommand(Command("hidden").hide(True))
+    )
+    error = err(cmd)
+    assert error.kind == MissingSubcommand("p", ())
+    assert "subcommands:" not in error.message
+    assert "<COMMAND>" in error.render()
 
 
 def test_subcommand_errors() -> None:

@@ -223,14 +223,17 @@ class _State:
             elif token == "--":
                 self.escaped = True
             elif token.startswith("--"):
-                self._long(token)
+                if self._hyphen_starts_positional(token):
+                    self._consume_positional()
+                else:
+                    self._long(token)
             elif token.startswith("-") and token != "-":
                 positional = self._current_positional()
                 if (
                     is_negative_number_prefix(token)
                     and positional is not None
                     and positional.allow_negative_numbers
-                ):
+                ) or self._hyphen_starts_positional(token):
                     self._consume_positional()
                 else:
                     self._short(token)
@@ -247,7 +250,7 @@ class _State:
             self.pending_count = 0
 
     def _long(self, token: str) -> None:
-        name, has_value, inline = token[2:].partition("=")
+        name, has_value, _ = token[2:].partition("=")
         arg = self.cmd.by_long.get(name)
         if arg is None:
             return
@@ -256,9 +259,13 @@ class _State:
         if arg.require_equals and not has_value:
             # `--color` is complete on its own; the next word is not its value.
             return
-        self._start_pending(arg, 1 if has_value else 0)
-        if has_value and inline != "" and self.pending is not None:
-            self._consume_pending()
+        if has_value:
+            # An inline value is one complete occurrence. The parser never
+            # consumes the word after it, so neither does completion.
+            self.pending = None
+            self.pending_count = 0
+        else:
+            self._start_pending(arg)
 
     def _short(self, token: str) -> None:
         cluster = token[1:]
@@ -272,18 +279,18 @@ class _State:
             if arg.require_equals and not rest.startswith("="):
                 # `-c` and `-cvalue` do not consume the next word; only `-c=...` does.
                 return
-            inline = rest.removeprefix("=") if rest else None
-            self._start_pending(arg, 1 if inline is not None else 0)
-            if inline not in (None, "") and self.pending is not None:
-                self._consume_pending()
+            if rest:
+                # An attached value (including `=`) is one complete occurrence;
+                # the next word is not its value.
+                self.pending = None
+                self.pending_count = 0
+            else:
+                self._start_pending(arg)
             return
 
-    def _start_pending(self, arg: ResolvedArg, count: int) -> None:
+    def _start_pending(self, arg: ResolvedArg) -> None:
         self.pending = arg
-        self.pending_count = count
-        if arg.max_values is not None and count >= arg.max_values:
-            self.pending = None
-            self.pending_count = 0
+        self.pending_count = 0
 
     def _word(self, token: str) -> None:
         if self.help_parent is not None and token in self.help_parent.subcommand_names:
@@ -327,6 +334,22 @@ class _State:
             return None
         return arg
 
+    def _hyphen_starts_positional(self, token: str) -> bool:
+        """Whether an unknown hyphenated word belongs to the current positional.
+
+        The parser falls back to a positional with `allow_hyphen_values` when a
+        word is not a known option. Known options still win, and `--` and `-`
+        keep their parser meaning.
+        """
+        if token in ("--", "-"):
+            return False
+        positional = self._current_positional()
+        if positional is None or not positional.allow_hyphen_values:
+            return False
+        if token.startswith("--"):
+            return token[2:].partition("=")[0] not in self.cmd.by_long
+        return token[1:2] not in self.cmd.by_short
+
     def result(self, token: str) -> CompletionResult:
         """Candidates for the word currently being completed."""
         if self.trailing_started:
@@ -340,6 +363,9 @@ class _State:
             positional = self._current_positional()
             if positional is not None and positional.allow_negative_numbers:
                 return self._positional_result(token)
+
+        if self._hyphen_starts_positional(token):
+            return self._positional_result(token)
 
         if token.startswith("--"):
             return self._long_result(token)
@@ -513,6 +539,8 @@ def _value_like(token: str, arg: ResolvedArg) -> bool:
 
 
 def _can_be_value(token: str, arg: ResolvedArg) -> bool:
+    if token == "--":
+        return False
     if arg.allow_hyphen_values:
         return True
     if not token.startswith("-") or token == "-":

@@ -9,7 +9,6 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING, Any
 
-from argbuilder._build import descendants
 from argbuilder._error import (
     ArgumentConflict,
     DisplayHelp,
@@ -36,7 +35,7 @@ from argbuilder._suggest import suggest
 from argbuilder._value_parser import Invalid, parse_boolish
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from argbuilder._build import ResolvedArg, ResolvedCommand
 
@@ -322,12 +321,14 @@ class _Parser:
                 flag = f"--{arg.long}" if arg.long is not None else f"-{arg.short}"
                 tip = f"to pass '{nearby}' as a value, use '{flag}={nearby}'"
             return self._error(InvalidValue(display_arg(arg), None), tip)
+        stored_raws = raws
         if raws:
             values = self._parse_values(arg, raws, env=None)
             if isinstance(values, Error):
                 return values
         else:
             values = list(arg.default_missing)
+            stored_raws = list(arg.default_missing_raw)
         store = self._store(arg)
         if arg.action == "set":
             if arg.id in store:
@@ -335,7 +336,7 @@ class _Parser:
             store[arg.id] = values
         else:
             store.setdefault(arg.id, []).extend(values)
-        self._raw_store(arg).setdefault(arg.id, []).extend(raws)
+        self._raw_store(arg).setdefault(arg.id, []).extend(stored_raws)
         self._mark_given(arg)
         self._remove_overridden(arg)
         return index
@@ -345,16 +346,25 @@ class _Parser:
         arg: ResolvedArg,
         raws: list[str],
         env: str | None,
+        *,
+        complete: bool = False,
     ) -> list[Any] | Error:
-        """Split, count-check and parse raw strings. `env` names the variable they came from."""
+        """Split, count-check and parse raw strings. `env` names the variable they came from.
+
+        `complete` says `raws` is the argument's whole value set (an environment
+        value), not one command-line token. Positionals are filled token by token
+        and checked for minimum arity after the line, so only a complete set can
+        be checked here for them.
+        """
         parser = arg.parser
         if parser is None:
             bug(f"argument {arg.id!r} takes values but has no parser")
         if arg.value_delimiter is not None:
             raws = [piece for raw in raws for piece in raw.split(arg.value_delimiter)]
-        if not arg.is_positional and len(raws) < arg.min_values:
+        arity = complete or not arg.is_positional
+        if arity and len(raws) < arg.min_values:
             return self._error(TooFewValues(display_arg(arg), arg.min_values, len(raws), env))
-        if not arg.is_positional and arg.max_values is not None and len(raws) > arg.max_values:
+        if arity and arg.max_values is not None and len(raws) > arg.max_values:
             return self._error(TooManyValues(display_arg(arg), raws[arg.max_values], env))
         values: list[Any] = []
         for raw in raws:
@@ -399,14 +409,30 @@ class _Parser:
                     "default_value",
                     arg.defaults_raw if takes_values(arg.action) else (),
                 )
+        if self._runs_completion_command():
+            return ArgMatches(self._cmd, matched, self._subcommand)
         problem = self._validate(matched)
         if problem is not None:
             return problem
         return ArgMatches(self._cmd, matched, self._subcommand)
 
+    def _runs_completion_command(self) -> bool:
+        """Whether this level chose the automatic `completion` command.
+
+        That command is a meta command like `help`: it prints a script from the
+        command tree, so this level's required arguments, conflicts and arity do
+        not apply. The completion command's own arguments were validated by its
+        parser before this level finished.
+        """
+        return (
+            self._cmd.completion_subcommand
+            and self._subcommand is not None
+            and self._subcommand[0] == "completion"
+        )
+
     def _env_values(self, arg: ResolvedArg, raw: str) -> list[Any] | Error:
         if takes_values(arg.action):
-            return self._parse_values(arg, [raw], arg.env)
+            return self._parse_values(arg, [raw], arg.env, complete=True)
         flag = parse_boolish(raw)
         if isinstance(flag, Invalid):
             return self._error(InvalidValue(display_arg(arg), raw, flag.message, env=arg.env))
@@ -475,13 +501,17 @@ class _Parser:
             display_arg(arg) for arg in cmd.required_args if arg.id not in explicit
         ]
         for group in cmd.groups:
-            if group.required and not any(member in explicit for member in group.members):
+            if group.required and not any(
+                self._present(matched, member) for member in group.members
+            ):
                 members = "|".join(display_arg(cmd.by_id[member]) for member in group.members)
                 missing.append(f"<{members}>")
         for arg in cmd.requiring_args:
             if arg.id not in explicit:
                 continue
-            for needed in sorted(arg.requires - explicit):
+            for needed in sorted(arg.requires):
+                if self._present(matched, needed):
+                    continue
                 shown = display_arg(cmd.by_id[needed])
                 if shown not in missing:
                     missing.append(shown)
@@ -520,7 +550,8 @@ class _Parser:
     def _check_subcommand(self) -> Error | None:
         cmd = self._cmd
         if cmd.subcommand_required and self._subcommand is None:
-            return self._error(MissingSubcommand(" ".join(cmd.path), tuple(cmd.subcommands)))
+            visible = tuple(name for name, sub in cmd.subcommands.items() if not sub.hidden)
+            return self._error(MissingSubcommand(" ".join(cmd.path), visible))
         return None
 
     # -- helpers ------------------------------------------------------------
@@ -529,7 +560,7 @@ class _Parser:
         """A tip when `flag` is unknown here but exists on a parent or subcommand."""
         owners = [
             other
-            for other in (*reversed(self._ancestors), *descendants(self._cmd))
+            for other in (*reversed(self._ancestors), *_visible_descendants(self._cmd))
             if _owns(other, flag)
         ]
         if not owners:
@@ -641,6 +672,15 @@ def _help_for(cmd: ResolvedCommand, names: Sequence[str]) -> Error:
     return _help_error(DisplayHelp(), target)
 
 
+def _visible_descendants(cmd: ResolvedCommand) -> Iterator[ResolvedCommand]:
+    """Every subcommand below `cmd` except hidden ones and their whole subtree."""
+    for sub in cmd.subcommands.values():
+        if sub.hidden:
+            continue
+        yield sub
+        yield from _visible_descendants(sub)
+
+
 def _visible_subcommand_names(cmd: ResolvedCommand) -> list[str]:
     """Names worth suggesting: canonical names and visible aliases, not hidden aliases."""
     return [
@@ -651,9 +691,24 @@ def _visible_subcommand_names(cmd: ResolvedCommand) -> list[str]:
 
 
 def _owns(cmd: ResolvedCommand, flag: str) -> bool:
-    arg = cmd.by_long.get(flag[2:]) if flag.startswith("--") else cmd.by_short.get(flag[1:])
-    # An inherited global belongs to the ancestor that defined it, which is listed already.
-    return arg is not None and not arg.hide and arg.id not in cmd.inherited
+    """Whether `cmd` offers `flag` as a visible, non-inherited spelling.
+
+    Hidden commands, hidden arguments and hidden aliases never appear in a tip,
+    and an inherited global belongs to the ancestor that defined it.
+    """
+    if cmd.hidden:
+        return False
+    if flag.startswith("--"):
+        name = flag[2:]
+        arg = cmd.by_long.get(name)
+        if arg is None or arg.hide or name in arg.aliases:
+            return False
+    else:
+        char = flag[1:]
+        arg = cmd.by_short.get(char)
+        if arg is None or arg.hide or char in arg.short_aliases:
+            return False
+    return arg.id not in cmd.inherited
 
 
 def _similar_tip(what: str, closest: str | None) -> str | None:

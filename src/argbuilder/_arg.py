@@ -39,6 +39,18 @@ def _check_iterable(owner: str, method: str, value: object) -> None:
     )
 
 
+def _check_ordered(owner: str, method: str, value: object) -> None:
+    """Reject a set where declaration order is part of the contract.
+
+    A set's iteration order is hash-randomized, which would make help, defaults
+    and error text vary between processes.
+    """
+    invariant(
+        isinstance(value, Iterable) and not isinstance(value, (str, set, frozenset)),
+        f"{owner}.{method}() takes an ordered iterable; a set has no order",
+    )
+
+
 class Arg:
     """One argument, built fluently: `Arg("port").short("p").long("port")`.
 
@@ -176,6 +188,7 @@ class Arg:
 
     def default_values(self, values: Iterable[str]) -> Arg:
         _check_iterable(self._owner, "default_values", values)
+        _check_ordered(self._owner, "default_values", values)
         collected = tuple(values)
         invariant(
             len(collected) > 0 and all(isinstance(value, str) for value in collected),
@@ -295,7 +308,8 @@ class Arg:
         For wrappers: `mytool run cargo build --release` stores
         `("cargo", "build", "--release")` in this positional. It must be the
         final positional with an unbounded `num_args`, and cannot be combined
-        with `last()` or `allow_hyphen_values()`.
+        with `last()`. A known option still parses before the run starts;
+        `allow_hyphen_values(True)` lets an unknown `-x` or `--flag` start it.
         """
         return self._with(
             trailing_var_arg=_check_bool(self._owner, "trailing_var_arg", yes),
@@ -361,7 +375,9 @@ class ArgGroup:
         return self.args([id])
 
     def args(self, ids: Iterable[str]) -> ArgGroup:
-        _check_iterable(f"ArgGroup({self._spec.id!r})", "args", ids)
+        owner = f"ArgGroup({self._spec.id!r})"
+        _check_iterable(owner, "args", ids)
+        _check_ordered(owner, "args", ids)
         members = self._spec.args + tuple(_check_id("Arg", id) for id in ids)
         invariant(
             len(set(members)) == len(members),
