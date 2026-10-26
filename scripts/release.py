@@ -167,8 +167,9 @@ def pypi_release(version: str) -> dict[str, str] | None:
     body = fetch_json(f"{PYPI}/{PACKAGE}/{version}/json")
     if body is None:
         return None
-    urls = body["urls"]
-    assert isinstance(urls, list)
+    urls = body.get("urls")
+    if not isinstance(urls, list):
+        fail(f"PyPI returned no file list for {PACKAGE} {version}")
     return {file["filename"]: file["digests"]["sha256"] for file in urls}
 
 
@@ -176,9 +177,13 @@ def pypi_latest() -> str | None:
     body = fetch_json(f"{PYPI}/{PACKAGE}/json")
     if body is None:
         return None
-    info = body["info"]
-    assert isinstance(info, dict)
-    return info["version"]
+    info = body.get("info")
+    if not isinstance(info, dict):
+        fail(f"PyPI returned no project info for {PACKAGE}")
+    version = info.get("version")
+    if not isinstance(version, str):
+        fail(f"PyPI returned no latest version for {PACKAGE}")
+    return version
 
 
 def git(*args: str) -> str:

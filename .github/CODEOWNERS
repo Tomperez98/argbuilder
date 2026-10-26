@@ -1,5 +1,19 @@
 # The contract is what users were promised: a change to it needs an owner's
-# review (ship skill, CI.md rule 10). Enforce with the main branch ruleset's
-# "Require review from Code Owners".
+# review (ship skill, CI.md rule 10). Code-owner review is currently off in
+# .github/settings.json until a second maintainer exists; this file is the
+# routing table for when it is turned on.
 /contract/Contract/ @Tomperez98
 /contract/driver.py @Tomperez98
+
+# The public API surface: these modules define the names, signatures and error
+# union users call. Internals stay out; the executable contract covers behavior.
+/src/argbuilder/__init__.py @Tomperez98
+/src/argbuilder/_arg.py @Tomperez98
+/src/argbuilder/_command.py @Tomperez98
+/src/argbuilder/_spec.py @Tomperez98
+/src/argbuilder/_error.py @Tomperez98
+/src/argbuilder/_matches.py @Tomperez98
+/src/argbuilder/_value_parser.py @Tomperez98
+/src/argbuilder/_completion.py @Tomperez98
+/src/argbuilder/_help.py @Tomperez98
+/src/argbuilder/_docs.py @Tomperez98

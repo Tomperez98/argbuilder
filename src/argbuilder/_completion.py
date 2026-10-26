@@ -21,7 +21,7 @@ import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from argbuilder._invariant import invariant
+from argbuilder._invariant import bug, invariant
 from argbuilder._spec import (
     SHELLS,
     Shell,
@@ -238,9 +238,11 @@ class _State:
                 self._word(token)
 
     def _consume_pending(self) -> None:
-        assert self.pending is not None
+        pending = self.pending
+        if pending is None:
+            bug("pending argument disappeared while consuming its value")
         self.pending_count += 1
-        if self.pending.max_values is not None and self.pending_count >= self.pending.max_values:
+        if pending.max_values is not None and self.pending_count >= pending.max_values:
             self.pending = None
             self.pending_count = 0
 

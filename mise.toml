@@ -13,9 +13,9 @@ depends = ["sync"]
 run = "uv run --no-sync ruff format --check"
 
 [tasks.typecheck]
-description = "Type-check with ty"
+description = "Type-check with ty, with warnings fatal"
 depends = ["sync"]
-run = "uv run --no-sync ty check"
+run = "uv run --no-sync ty check --error-on-warning"
 
 [tasks.test]
 description = "Run the test suite"
@@ -58,7 +58,18 @@ depends = ["lint", "format", "typecheck"]
 
 [tasks.ci]
 description = "The full suite: the same command CI runs"
-depends = ["ci:fast", "test", "test:completion", "smoke", "contract:check", "contract:compat", "release:dry-run"]
+# Sequential on purpose: the contract and release-dry-run tasks all run
+# `dotnet` against contract/Contract/obj, and parallel builds race there.
+run = """
+set -e
+mise run ci:fast
+mise run test
+mise run test:completion
+mise run smoke
+mise run contract:check
+mise run contract:compat
+mise run release:dry-run
+"""
 
 [tasks."github:apply"]
 description = "Apply .github/settings.json to the live repository (needs admin gh auth)"
